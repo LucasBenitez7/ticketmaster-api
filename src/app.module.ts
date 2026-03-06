@@ -1,26 +1,33 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
+import { PrismaModule } from '../prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
+
+const isDev = process.env.NODE_ENV !== 'production';
 
 @Module({
   imports: [
-    // Config global — disponible en toda la app sin importar en cada módulo
     ConfigModule.forRoot({
       isGlobal: true,
     }),
 
-    // Logger estructurado global
     LoggerModule.forRoot({
       pinoHttp: {
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            singleLine: true,
-          },
-        },
+        level: isDev ? 'debug' : 'info',
+        transport: isDev
+          ? {
+              target: 'pino-pretty',
+              options: {
+                colorize: true,
+                singleLine: true,
+              },
+            }
+          : undefined,
       },
     }),
+    PrismaModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
