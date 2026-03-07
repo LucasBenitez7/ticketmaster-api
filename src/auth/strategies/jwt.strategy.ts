@@ -24,13 +24,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (!secret) throw new Error('JWT_SECRET is not defined');
 
     const options: StrategyOptionsWithoutRequest = {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: secret,
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     super(options);
   }
 

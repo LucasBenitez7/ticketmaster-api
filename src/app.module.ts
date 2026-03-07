@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { LoggerModule } from 'nestjs-pino';
-import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { ConfigModule } from '@nestjs/config';
+import { EventsModule } from './events/events.module';
+import { LoggerModule } from 'nestjs-pino';
+import { Module } from '@nestjs/common';
+import { PrismaModule } from '../prisma/prisma.module';
+import { StorageModule } from './storage/storage.module';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -26,8 +28,10 @@ const isDev = process.env.NODE_ENV !== 'production';
           : undefined,
       },
     }),
-    PrismaModule,
     AuthModule,
+    EventsModule,
+    PrismaModule,
+    StorageModule,
   ],
 })
 export class AppModule {}
