@@ -1,13 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import {
-  IsString,
-  IsDateString,
-  IsNumber,
-  IsPositive,
-  MinLength,
-  Min,
-} from 'class-validator';
+import { IsString, IsDateString, MinLength } from 'class-validator';
 
 export class CreateEventDto {
   @ApiProperty({ example: 'Rock Festival 2026' })
@@ -15,7 +7,7 @@ export class CreateEventDto {
   @MinLength(3)
   title: string;
 
-  @ApiProperty({ example: 'The best rock festival of the year' })
+  @ApiProperty({ example: 'The best rock festival of the year in the city' })
   @IsString()
   @MinLength(10)
   description: string;
@@ -27,16 +19,4 @@ export class CreateEventDto {
   @ApiProperty({ example: 'Madison Square Garden, New York' })
   @IsString()
   location: string;
-
-  @ApiProperty({ example: 99.99 })
-  @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
-  price: number;
-
-  @ApiProperty({ example: 1000 })
-  @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  totalTickets: number;
 }
