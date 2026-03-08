@@ -8,11 +8,40 @@ datasource db {
   provider = "postgresql"
 }
 
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  SOLD_OUT
+  CANCELLED
+  COMPLETED
+}
+
+enum RefundPolicy {
+  REFUNDABLE
+  PARTIAL
+  NON_REFUNDABLE
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
   name      String
+  orders    Order[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -20,17 +49,73 @@ model User {
 }
 
 model Event {
-  id               String   @id @default(uuid())
+  id               String           @id @default(uuid())
   title            String
   description      String
   date             DateTime
   location         String
-  price            Decimal  @db.Decimal(10, 2)
-  totalTickets     Int
-  availableTickets Int
   posterUrl        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  status           EventStatus      @default(DRAFT)
+  ticketCategories TicketCategory[]
+  orders           Order[]
+  tickets          Ticket[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   @@map("events")
+}
+
+model TicketCategory {
+  id                  String       @id @default(uuid())
+  eventId             String
+  name                String
+  description         String?
+  price               Decimal      @db.Decimal(10, 2)
+  totalStock          Int
+  availableStock      Int
+  maxTicketsPerUser   Int          @default(10)
+  refundPolicy        RefundPolicy @default(REFUNDABLE)
+  refundPercentage    Int          @default(100)
+  refundDeadlineHours Int          @default(48)
+  event               Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orders              Order[]
+  tickets             Ticket[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@map("ticket_categories")
+}
+
+model Order {
+  id                    String         @id @default(uuid())
+  userId                String
+  eventId               String
+  categoryId            String
+  quantity              Int
+  totalAmount           Decimal        @db.Decimal(10, 2)
+  refundAmount          Decimal?       @db.Decimal(10, 2)
+  status                OrderStatus    @default(PENDING)
+  stripePaymentIntentId String?
+  expiresAt             DateTime
+  user                  User           @relation(fields: [userId], references: [id])
+  event                 Event          @relation(fields: [eventId], references: [id])
+  category              TicketCategory @relation(fields: [categoryId], references: [id])
+  tickets               Ticket[]
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@map("orders")
+}
+
+model Ticket {
+  id         String         @id @default(uuid())
+  orderId    String
+  eventId    String
+  categoryId String
+  order      Order          @relation(fields: [orderId], references: [id])
+  event      Event          @relation(fields: [eventId], references: [id])
+  category   TicketCategory @relation(fields: [categoryId], references: [id])
+  createdAt  DateTime       @default(now())
+
+  @@map("tickets")
 }

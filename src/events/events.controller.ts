@@ -23,6 +23,7 @@ import { memoryStorage } from 'multer';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { UpdateEventStatusDto } from './dto/update-event-status.dto';
 import { PaginateEventsDto } from './dto/paginate-events.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -68,6 +69,17 @@ export class EventsController {
     @UploadedFile() poster?: Express.Multer.File,
   ) {
     return this.eventsService.update(id, dto, poster);
+  }
+
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update event status' })
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEventStatusDto,
+  ) {
+    return this.eventsService.updateStatus(id, dto.status);
   }
 
   @Delete(':id')

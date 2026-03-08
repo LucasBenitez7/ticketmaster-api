@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { PaginateEventsDto } from './dto/paginate-events.dto';
+import { EventStatus, OrderStatus } from '../generated/prisma/client/client';
 
 @Injectable()
 export class EventsService {
@@ -25,11 +30,10 @@ export class EventsService {
         description: dto.description,
         date: new Date(dto.date),
         location: dto.location,
-        price: dto.price.toString(),
-        totalTickets: dto.totalTickets,
-        availableTickets: dto.totalTickets,
         posterUrl,
+        status: EventStatus.DRAFT,
       },
+      include: { ticketCategories: true },
     });
   }
 
@@ -41,9 +45,13 @@ export class EventsService {
       this.prisma.event.findMany({
         skip,
         take: limit,
+        where: { status: EventStatus.PUBLISHED },
         orderBy: { date: 'asc' },
+        include: { ticketCategories: true },
       }),
-      this.prisma.event.count(),
+      this.prisma.event.count({
+        where: { status: EventStatus.PUBLISHED },
+      }),
     ]);
 
     return {
@@ -58,7 +66,10 @@ export class EventsService {
   }
 
   async findOne(id: string) {
-    const event = await this.prisma.event.findUnique({ where: { id } });
+    const event = await this.prisma.event.findUnique({
+      where: { id },
+      include: { ticketCategories: true },
+    });
     if (!event) throw new NotFoundException(`Event ${id} not found`);
     return event;
   }
@@ -69,10 +80,12 @@ export class EventsService {
     let posterUrl: string | undefined = event.posterUrl ?? undefined;
 
     if (poster) {
+      // Primero subir la nueva imagen, luego borrar la vieja
+      const newPosterUrl = await this.storage.uploadFile(poster, 'posters');
       if (event.posterUrl) {
         await this.storage.deleteFile(event.posterUrl);
       }
-      posterUrl = await this.storage.uploadFile(poster, 'posters');
+      posterUrl = newPosterUrl;
     }
 
     return this.prisma.event.update({
@@ -82,17 +95,55 @@ export class EventsService {
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.date !== undefined && { date: new Date(dto.date) }),
         ...(dto.location !== undefined && { location: dto.location }),
-        ...(dto.price !== undefined && { price: dto.price.toString() }),
-        ...(dto.totalTickets !== undefined && {
-          totalTickets: dto.totalTickets,
-        }),
         posterUrl,
       },
+      include: { ticketCategories: true },
+    });
+  }
+
+  async updateStatus(id: string, status: EventStatus) {
+    const event = await this.findOne(id);
+
+    if (status === EventStatus.CANCELLED) {
+      if (event.status === EventStatus.CANCELLED) {
+        throw new BadRequestException('Event is already cancelled');
+      }
+
+      return this.prisma.$transaction(async (tx) => {
+        await tx.order.updateMany({
+          where: { eventId: id, status: OrderStatus.PAID },
+          data: { status: OrderStatus.CANCELLED },
+        });
+
+        return tx.event.update({
+          where: { id },
+          data: { status },
+          include: { ticketCategories: true },
+        });
+      });
+    }
+
+    return this.prisma.event.update({
+      where: { id },
+      data: { status },
+      include: { ticketCategories: true },
     });
   }
 
   async remove(id: string) {
     const event = await this.findOne(id);
+
+    // Verificar que no hay órdenes activas antes de eliminar
+    const activeOrders = await this.prisma.order.count({
+      where: {
+        eventId: id,
+        status: { in: [OrderStatus.PENDING, OrderStatus.PAID] },
+      },
+    });
+
+    if (activeOrders > 0) {
+      throw new BadRequestException('Cannot delete event with active orders');
+    }
 
     if (event.posterUrl) {
       await this.storage.deleteFile(event.posterUrl);

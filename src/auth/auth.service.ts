@@ -17,8 +17,10 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+
     const exists = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email: normalizedEmail },
     });
 
     if (exists) throw new ConflictException('Email already in use');
@@ -26,7 +28,7 @@ export class AuthService {
     const hashed = await bcrypt.hash(dto.password, 10);
 
     const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, password: hashed },
+      data: { name: dto.name, email: normalizedEmail, password: hashed },
     });
 
     const token = this.signToken(user.id, user.email);
@@ -34,8 +36,10 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email: normalizedEmail },
     });
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
