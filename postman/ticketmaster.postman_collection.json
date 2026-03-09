@@ -1,0 +1,495 @@
+{
+  "info": {
+    "name": "Ticketmaster API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.environment.set('adminToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@ticketmaster.com\",\n  \"password\": \"Admin1234!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Register Customer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.environment.set('customerEmail', 'newman_' + Date.now() + '@test.com');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "const token = pm.response.json().accessToken;",
+                  "const payload = JSON.parse(atob(token.split('.')[1]));",
+                  "pm.environment.set('targetUserId', payload.sub);",
+                  "pm.environment.set('customerToken', token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Newman Customer\",\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"Test1234!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Change User Role (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Role is ADMIN', () => pm.expect(pm.response.json().role).to.eql('ADMIN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/users/{{targetUserId}}/role",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "users", "{{targetUserId}}", "role"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"ADMIN\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "Create Event (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(pm.response.json().id).to.be.a('string'));",
+                  "pm.test('Status is DRAFT', () => pm.expect(pm.response.json().status).to.eql('DRAFT'));",
+                  "pm.environment.set('eventId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Newman Rock Fest 2025",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Test event created by Newman",
+                  "type": "text"
+                },
+                {
+                  "key": "date",
+                  "value": "2025-12-01T20:00:00.000Z",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "Buenos Aires, Argentina",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Event as Customer (should 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 403 - CUSTOMER cannot create events', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Evento Pirata", "type": "text" },
+                {
+                  "key": "description",
+                  "value": "No deberia crearse",
+                  "type": "text"
+                },
+                {
+                  "key": "date",
+                  "value": "2025-12-01T20:00:00.000Z",
+                  "type": "text"
+                },
+                { "key": "location", "value": "Nowhere", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get All Events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has data array', () => pm.expect(pm.response.json().data).to.be.an('array'));",
+                  "pm.test('Has meta', () => pm.expect(pm.response.json().meta).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Event By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ID matches', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('eventId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Event Status to PUBLISHED (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status is PUBLISHED', () => pm.expect(pm.response.json().status).to.eql('PUBLISHED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PUBLISHED\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Event (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Title updated', () => pm.expect(pm.response.json().title).to.eql('Newman Rock Fest 2025 - Updated'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Newman Rock Fest 2025 - Updated",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Create Category (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(pm.response.json().id).to.be.a('string'));",
+                  "pm.test('Name is VIP', () => pm.expect(pm.response.json().name).to.eql('VIP'));",
+                  "pm.environment.set('categoryId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}", "categories"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VIP\",\n  \"description\": \"Acceso VIP con vista al escenario\",\n  \"price\": 150.00,\n  \"totalStock\": 100,\n  \"maxTicketsPerUser\": 4,\n  \"refundPolicy\": \"PARTIAL\",\n  \"refundPercentage\": 80,\n  \"refundDeadlineHours\": 48\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Has at least 1 category', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}", "categories"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Checkout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has orderId', () => pm.expect(pm.response.json().orderId).to.be.a('string'));",
+                  "pm.test('Status is PENDING', () => pm.expect(pm.response.json().status).to.eql('PENDING'));",
+                  "pm.test('Has stripeClientSecret', () => pm.expect(pm.response.json().stripeClientSecret).to.be.a('string'));",
+                  "pm.environment.set('orderId', pm.response.json().orderId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/checkout",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "checkout"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"quantity\": 2\n}"
+            }
+          }
+        },
+        {
+          "name": "Get My Orders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Has at least 1 order', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/my-orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "my-orders"]
+            }
+          }
+        },
+        {
+          "name": "Get Order By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ID matches', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('orderId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}"]
+            }
+          }
+        },
+        {
+          "name": "Refund Order (should 400 - order is PENDING)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400 - cannot refund PENDING order', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/refund",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}", "refund"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

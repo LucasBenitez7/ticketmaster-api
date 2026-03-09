@@ -26,6 +26,9 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { UpdateEventStatusDto } from './dto/update-event-status.dto';
 import { PaginateEventsDto } from './dto/paginate-events.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { Role } from '../generated/prisma/client/client';
 
 @ApiTags('Events')
 @Controller('events')
@@ -33,9 +36,10 @@ export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a new event with optional poster' })
+  @ApiOperation({ summary: 'Create a new event (ADMIN only)' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('poster', { storage: memoryStorage() }))
   create(
@@ -46,7 +50,7 @@ export class EventsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all events with pagination' })
+  @ApiOperation({ summary: 'Get all published events with pagination' })
   findAll(@Query() query: PaginateEventsDto) {
     return this.eventsService.findAll(query);
   }
@@ -58,9 +62,10 @@ export class EventsController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update an event' })
+  @ApiOperation({ summary: 'Update an event (ADMIN only)' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('poster', { storage: memoryStorage() }))
   update(
@@ -72,9 +77,10 @@ export class EventsController {
   }
 
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update event status' })
+  @ApiOperation({ summary: 'Update event status (ADMIN only)' })
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEventStatusDto,
@@ -83,9 +89,10 @@ export class EventsController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Delete an event' })
+  @ApiOperation({ summary: 'Delete an event (ADMIN only)' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.eventsService.remove(id);
   }

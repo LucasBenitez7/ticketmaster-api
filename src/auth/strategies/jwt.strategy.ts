@@ -6,15 +6,18 @@ import {
   Strategy,
   type StrategyOptionsWithoutRequest,
 } from 'passport-jwt';
+import { Role } from '../../generated/prisma/client/client';
 
 export interface JwtPayload {
   sub: string;
   email: string;
+  role: Role;
 }
 
 export interface AuthUser {
   id: string;
   email: string;
+  role: Role;
 }
 
 @Injectable()
@@ -33,6 +36,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   validate(payload: JwtPayload): AuthUser {
-    return { id: payload.sub, email: payload.email };
+    return { id: payload.sub, email: payload.email, role: payload.role };
   }
 }

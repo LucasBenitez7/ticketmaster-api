@@ -1,8 +1,21 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Patch,
+  Body,
+  Param,
+  UseGuards,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangeRoleDto } from './dto/change-role.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
+import { Role } from '../generated/prisma/client/client';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -16,9 +29,20 @@ export class AuthController {
   }
 
   @Post('login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login and get JWT token' })
+  @ApiOperation({ summary: 'Login' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Patch('users/:id/role')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change user role (ADMIN only)' })
+  changeRole(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChangeRoleDto,
+  ) {
+    return this.authService.changeRole(id, dto.role);
   }
 }
