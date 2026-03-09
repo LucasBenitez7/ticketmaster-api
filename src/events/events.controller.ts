@@ -18,6 +18,9 @@ import {
   ApiOperation,
   ApiBearerAuth,
   ApiConsumes,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import { EventsService } from './events.service';
@@ -39,8 +42,16 @@ export class EventsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a new event (ADMIN only)' })
+  @ApiOperation({
+    summary: 'Create a new event (ADMIN only)',
+    description:
+      'Creates a new event in DRAFT status. Optionally accepts a poster image (multipart/form-data).',
+  })
   @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Event created in DRAFT status.' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden — ADMIN role required' })
   @UseInterceptors(FileInterceptor('poster', { storage: memoryStorage() }))
   create(
     @Body() dto: CreateEventDto,
@@ -50,23 +61,54 @@ export class EventsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all published events with pagination' })
+  @ApiOperation({
+    summary: 'Get all published events with pagination',
+    description:
+      'Returns only PUBLISHED events. Results are cached in Redis for 60 seconds.',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated list of published events.',
+    schema: {
+      example: {
+        data: [],
+        meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+      },
+    },
+  })
   findAll(@Query() query: PaginateEventsDto) {
     return this.eventsService.findAll(query);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get event by ID' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Event details with ticket categories.',
+  })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.eventsService.findOne(id);
+    return this.eventsService.findOne(id, true);
   }
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update an event (ADMIN only)' })
+  @ApiOperation({
+    summary: 'Update an event (ADMIN only)',
+    description:
+      'Updates event fields. If a new poster is uploaded, the old one is deleted from storage.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
   @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 200, description: 'Event updated.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden — ADMIN role required' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   @UseInterceptors(FileInterceptor('poster', { storage: memoryStorage() }))
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -80,7 +122,20 @@ export class EventsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update event status (ADMIN only)' })
+  @ApiOperation({
+    summary: 'Update event status (ADMIN only)',
+    description:
+      'Transitions the event status. When set to CANCELLED, all PAID orders are cancelled automatically.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Event status updated.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Event is already in the target status',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden — ADMIN role required' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEventStatusDto,
@@ -92,7 +147,20 @@ export class EventsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Delete an event (ADMIN only)' })
+  @ApiOperation({
+    summary: 'Delete an event (ADMIN only)',
+    description:
+      'Deletes an event. Fails if the event has active PENDING or PAID orders.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Event deleted.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Cannot delete event with active orders',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden — ADMIN role required' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.eventsService.remove(id);
   }
