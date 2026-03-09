@@ -32,17 +32,9 @@ export class OrdersService {
     private readonly queuesService: QueuesService,
     private readonly wsGateway: WebsocketGateway,
   ) {
-    this.stripe = new Stripe(
-      this.config.get<string>('STRIPE_SECRET_KEY') ?? '',
-    );
-  }
-
-  private async emitStockForEvent(eventId: string) {
-    const categories = await this.prisma.ticketCategory.findMany({
-      where: { eventId },
-      select: { id: true, name: true, availableStock: true },
-    });
-    this.wsGateway.emitStockUpdate(eventId, categories);
+    const stripeKey = this.config.get<string>('STRIPE_SECRET_KEY');
+    if (!stripeKey) throw new Error('STRIPE_SECRET_KEY is not defined');
+    this.stripe = new Stripe(stripeKey);
   }
 
   async checkout(dto: CheckoutDto, user: AuthUser) {
@@ -143,6 +135,7 @@ export class OrdersService {
 
       try {
         await this.prisma.$transaction(async (tx) => {
+          await tx.ticket.deleteMany({ where: { orderId: order.id } });
           await tx.order.update({
             where: { id: order.id },
             data: { status: OrderStatus.FAILED },
@@ -161,6 +154,15 @@ export class OrdersService {
 
       throw new BadRequestException(
         'Payment initialization failed, please try again',
+      );
+    }
+
+    if (!paymentIntent.client_secret) {
+      this.logger.error(
+        `Stripe PaymentIntent ${paymentIntent.id} returned null client_secret`,
+      );
+      throw new BadRequestException(
+        'Payment initialization incomplete, please try again',
       );
     }
 
@@ -291,7 +293,7 @@ export class OrdersService {
       refundPercentage,
     });
 
-    await this.emitStockForEvent(order.eventId);
+    await this.wsGateway.emitStockForEvent(order.eventId);
 
     return {
       orderId: updatedOrder.id,
@@ -331,7 +333,7 @@ export class OrdersService {
       eventTitle: order.event.title,
     });
 
-    await this.emitStockForEvent(order.eventId);
+    await this.wsGateway.emitStockForEvent(order.eventId);
 
     return true;
   }

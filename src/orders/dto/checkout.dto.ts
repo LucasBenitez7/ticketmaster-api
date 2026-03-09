@@ -12,12 +12,12 @@ export class CheckoutDto {
   @ApiProperty({
     example: 2,
     minimum: 1,
-    maximum: 10,
+    maximum: 20,
     description:
-      'Number of tickets to purchase (limited by maxTicketsPerUser on the category)',
+      'Number of tickets to purchase (limited by maxTicketsPerUser on the category, up to 20)',
   })
   @IsInt()
   @Min(1)
-  @Max(10)
+  @Max(20)
   quantity: number;
 }

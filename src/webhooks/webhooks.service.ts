@@ -17,9 +17,9 @@ export class WebhooksService {
     private readonly queuesService: QueuesService,
     private readonly wsGateway: WebsocketGateway,
   ) {
-    this.stripe = new Stripe(
-      this.config.get<string>('STRIPE_SECRET_KEY') ?? '',
-    );
+    const stripeKey = this.config.get<string>('STRIPE_SECRET_KEY');
+    if (!stripeKey) throw new Error('STRIPE_SECRET_KEY is not defined');
+    this.stripe = new Stripe(stripeKey);
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
@@ -55,14 +55,6 @@ export class WebhooksService {
     return { received: true };
   }
 
-  private async emitStockForEvent(eventId: string) {
-    const categories = await this.prisma.ticketCategory.findMany({
-      where: { eventId },
-      select: { id: true, name: true, availableStock: true },
-    });
-    this.wsGateway.emitStockUpdate(eventId, categories);
-  }
-
   private async handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent) {
     const order = await this.prisma.order.findFirst({
       where: { stripePaymentIntentId: paymentIntent.id },
@@ -83,6 +75,13 @@ export class WebhooksService {
 
     if (order.status === OrderStatus.PAID) {
       this.logger.warn(`Order ${order.id} already PAID, skipping`);
+      return;
+    }
+
+    if (order.status !== OrderStatus.PENDING) {
+      this.logger.warn(
+        `Order ${order.id} is in status ${order.status}, cannot mark as PAID. Skipping.`,
+      );
       return;
     }
 
@@ -108,8 +107,7 @@ export class WebhooksService {
       categoryName: order.category.name,
     });
 
-    // Emitir stock actualizado
-    await this.emitStockForEvent(order.eventId);
+    await this.wsGateway.emitStockForEvent(order.eventId);
   }
 
   private async handlePaymentFailed(paymentIntent: Stripe.PaymentIntent) {
@@ -137,7 +135,6 @@ export class WebhooksService {
 
     this.logger.log(`❌ Order ${order.id} marked as FAILED, stock restored`);
 
-    // Emitir stock actualizado
-    await this.emitStockForEvent(order.eventId);
+    await this.wsGateway.emitStockForEvent(order.eventId);
   }
 }

@@ -26,12 +26,16 @@ const isDev = process.env.NODE_ENV !== 'production';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get<string>('REDIS_HOST'),
-          port: parseInt(config.get<string>('REDIS_PORT') ?? '6379', 10),
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const password = config.get<string>('REDIS_PASSWORD');
+        return {
+          connection: {
+            host: config.get<string>('REDIS_HOST'),
+            port: parseInt(config.get<string>('REDIS_PORT') ?? '6379', 10),
+            ...(password ? { password } : {}),
+          },
+        };
+      },
     }),
 
     LoggerModule.forRoot({

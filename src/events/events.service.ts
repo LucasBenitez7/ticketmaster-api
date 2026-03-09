@@ -117,12 +117,15 @@ export class EventsService {
     return result;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, publicOnly = false) {
     const event = await this.prisma.event.findUnique({
       where: { id },
       include: { ticketCategories: true },
     });
     if (!event) throw new NotFoundException(`Event ${id} not found`);
+    if (publicOnly && event.status === EventStatus.DRAFT) {
+      throw new NotFoundException(`Event ${id} not found`);
+    }
     return event;
   }
 

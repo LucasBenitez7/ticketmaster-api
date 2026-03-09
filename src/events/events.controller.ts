@@ -91,7 +91,7 @@ export class EventsController {
   })
   @ApiResponse({ status: 404, description: 'Event not found' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.eventsService.findOne(id);
+    return this.eventsService.findOne(id, true);
   }
 
   @Patch(':id')

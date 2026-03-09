@@ -1,4 +1,11 @@
-import { Controller, Post, Req, Headers, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Req,
+  Headers,
+  HttpCode,
+  BadRequestException,
+} from '@nestjs/common';
 import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
@@ -17,6 +24,9 @@ export class WebhooksController {
     @Req() req: Request,
     @Headers('stripe-signature') signature: string,
   ) {
+    if (!signature) {
+      throw new BadRequestException('Missing stripe-signature header');
+    }
     return this.webhooksService.handleStripeWebhook(
       req.body as Buffer,
       signature,
