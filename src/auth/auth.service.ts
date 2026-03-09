@@ -6,17 +6,22 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { Role } from '../generated/prisma/client/client';
+
+const REFRESH_TOKEN_EXPIRES_DAYS = 30;
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly config: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -34,8 +39,15 @@ export class AuthService {
       data: { name: dto.name, email: normalizedEmail, password: hashed },
     });
 
-    const token = this.signToken(user.id, user.email, user.name, user.role);
-    return { accessToken: token };
+    const accessToken = this.signAccessToken(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+    );
+    const refreshToken = await this.generateRefreshToken(user.id);
+
+    return { accessToken, refreshToken };
   }
 
   async login(dto: LoginDto) {
@@ -50,8 +62,50 @@ export class AuthService {
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials');
 
-    const token = this.signToken(user.id, user.email, user.name, user.role);
-    return { accessToken: token };
+    const accessToken = this.signAccessToken(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+    );
+    const refreshToken = await this.generateRefreshToken(user.id);
+
+    return { accessToken, refreshToken };
+  }
+
+  async refresh(rawToken: string) {
+    const tokenHash = this.hashToken(rawToken);
+
+    const stored = await this.prisma.refreshToken.findUnique({
+      where: { token: tokenHash },
+      include: { user: true },
+    });
+
+    if (!stored) throw new UnauthorizedException('Invalid refresh token');
+
+    if (stored.expiresAt < new Date()) {
+      await this.prisma.refreshToken.delete({ where: { id: stored.id } });
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    const { count } = await this.prisma.refreshToken.deleteMany({
+      where: { id: stored.id },
+    });
+    if (count === 0) {
+      throw new UnauthorizedException('Refresh token already used');
+    }
+
+    const { user } = stored;
+
+    const accessToken = this.signAccessToken(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+    );
+    const refreshToken = await this.generateRefreshToken(user.id);
+
+    return { accessToken, refreshToken };
   }
 
   async changeRole(targetUserId: string, newRole: Role) {
@@ -74,7 +128,32 @@ export class AuthService {
     return updated;
   }
 
-  private signToken(userId: string, email: string, name: string, role: Role) {
+  // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  private signAccessToken(
+    userId: string,
+    email: string,
+    name: string,
+    role: Role,
+  ): string {
     return this.jwt.sign({ sub: userId, email, name, role });
+  }
+
+  private async generateRefreshToken(userId: string): Promise<string> {
+    const rawToken = crypto.randomBytes(64).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS);
+
+    await this.prisma.refreshToken.create({
+      data: { token: tokenHash, userId, expiresAt },
+    });
+
+    return rawToken;
+  }
+
+  private hashToken(raw: string): string {
+    return crypto.createHash('sha256').update(raw).digest('hex');
   }
 }

@@ -52,10 +52,12 @@
                 "exec": [
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "pm.test('Has accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.test('Has refreshToken', () => pm.expect(pm.response.json().refreshToken).to.be.a('string'));",
                   "const token = pm.response.json().accessToken;",
                   "const payload = JSON.parse(atob(token.split('.')[1]));",
                   "pm.environment.set('targetUserId', payload.sub);",
-                  "pm.environment.set('customerToken', token);"
+                  "pm.environment.set('customerToken', token);",
+                  "pm.environment.set('customerRefreshToken', pm.response.json().refreshToken);"
                 ]
               }
             }
@@ -71,6 +73,36 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Newman Customer\",\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"Test1234!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has new accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.test('Has new refreshToken', () => pm.expect(pm.response.json().refreshToken).to.be.a('string'));",
+                  "pm.environment.set('customerToken', pm.response.json().accessToken);",
+                  "pm.environment.set('customerRefreshToken', pm.response.json().refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}"
             }
           }
         },
