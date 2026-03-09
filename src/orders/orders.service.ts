@@ -124,6 +124,10 @@ export class OrdersService {
       paymentIntent = await this.stripe.paymentIntents.create({
         amount: Math.round(Number(order.totalAmount) * 100),
         currency: 'usd',
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: 'never',
+        },
         metadata: {
           orderId: order.id,
           userId: user.id,

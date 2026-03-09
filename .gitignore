@@ -61,3 +61,6 @@ src/generated
 
 # Postman
 postman/results.html
+
+# Payment
+stripe.exe
