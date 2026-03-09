@@ -91,6 +91,7 @@ export class AuthService {
     const { count } = await this.prisma.refreshToken.deleteMany({
       where: { id: stored.id },
     });
+
     if (count === 0) {
       throw new UnauthorizedException('Refresh token already used');
     }
@@ -106,6 +107,16 @@ export class AuthService {
     const refreshToken = await this.generateRefreshToken(user.id);
 
     return { accessToken, refreshToken };
+  }
+
+  async logout(rawToken: string): Promise<{ message: string }> {
+    const tokenHash = this.hashToken(rawToken);
+
+    await this.prisma.refreshToken.deleteMany({
+      where: { token: tokenHash },
+    });
+
+    return { message: 'Logged out successfully' };
   }
 
   async changeRole(targetUserId: string, newRole: Role) {
@@ -145,6 +156,11 @@ export class AuthService {
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS);
+
+    // Limpiar tokens expirados del usuario antes de crear uno nuevo
+    await this.prisma.refreshToken.deleteMany({
+      where: { userId, expiresAt: { lt: new Date() } },
+    });
 
     await this.prisma.refreshToken.create({
       data: { token: tokenHash, userId, expiresAt },
