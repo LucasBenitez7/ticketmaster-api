@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueuesService } from '../queues/queues.service';
 import { OrderStatus } from '../generated/prisma/client/client';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
 
 @Injectable()
 export class WebhooksService {
@@ -14,6 +15,7 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly queuesService: QueuesService,
+    private readonly wsGateway: WebsocketGateway,
   ) {
     this.stripe = new Stripe(
       this.config.get<string>('STRIPE_SECRET_KEY') ?? '',
@@ -22,13 +24,10 @@ export class WebhooksService {
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
     const webhookSecret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
-
-    if (!webhookSecret) {
+    if (!webhookSecret)
       throw new BadRequestException('Stripe webhook secret not configured');
-    }
 
     let event: Stripe.Event;
-
     try {
       event = this.stripe.webhooks.constructEvent(
         rawBody,
@@ -46,16 +45,22 @@ export class WebhooksService {
       case 'payment_intent.succeeded':
         await this.handlePaymentSucceeded(event.data.object);
         break;
-
       case 'payment_intent.payment_failed':
         await this.handlePaymentFailed(event.data.object);
         break;
-
       default:
         this.logger.log(`Unhandled Stripe event type: ${event.type}`);
     }
 
     return { received: true };
+  }
+
+  private async emitStockForEvent(eventId: string) {
+    const categories = await this.prisma.ticketCategory.findMany({
+      where: { eventId },
+      select: { id: true, name: true, availableStock: true },
+    });
+    this.wsGateway.emitStockUpdate(eventId, categories);
   }
 
   private async handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent) {
@@ -90,7 +95,6 @@ export class WebhooksService {
       `✅ Order ${order.id} marked as PAID (paymentIntent: ${paymentIntent.id})`,
     );
 
-    // Encolar job de email de confirmación
     await this.queuesService.addEmailJob({
       to: order.user.email,
       subject: `Confirmación de compra — ${order.event.title}`,
@@ -98,6 +102,9 @@ export class WebhooksService {
       eventTitle: order.event.title,
       userName: order.user.name,
     });
+
+    // Emitir stock actualizado
+    await this.emitStockForEvent(order.eventId);
   }
 
   private async handlePaymentFailed(paymentIntent: Stripe.PaymentIntent) {
@@ -117,15 +124,15 @@ export class WebhooksService {
         where: { id: order.id },
         data: { status: OrderStatus.FAILED },
       });
-
       await tx.ticketCategory.update({
         where: { id: order.categoryId },
         data: { availableStock: { increment: order.quantity } },
       });
     });
 
-    this.logger.log(
-      `❌ Order ${order.id} marked as FAILED, stock restored (paymentIntent: ${paymentIntent.id})`,
-    );
+    this.logger.log(`❌ Order ${order.id} marked as FAILED, stock restored`);
+
+    // Emitir stock actualizado
+    await this.emitStockForEvent(order.eventId);
   }
 }

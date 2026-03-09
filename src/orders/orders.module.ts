@@ -6,6 +6,7 @@ import { OrderExpiryProcessor } from '../queues/processors/order-expiry.processo
 import { QueuesService } from '../queues/queues.service';
 import { ORDER_EXPIRY_QUEUE, EMAIL_QUEUE } from '../queues/queues.constants';
 import { EmailProcessor } from '../queues/processors/email.processor';
+import { WebsocketModule } from '../websocket/websocket.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { EmailProcessor } from '../queues/processors/email.processor';
       { name: ORDER_EXPIRY_QUEUE },
       { name: EMAIL_QUEUE },
     ),
+    WebsocketModule,
   ],
   controllers: [OrdersController],
   providers: [

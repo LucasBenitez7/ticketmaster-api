@@ -3,12 +3,16 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.use('/webhooks/stripe', bodyParser.raw({ type: 'application/json' }));
+
+  // Socket.io adapter
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   // Logger estructurado
   app.useLogger(app.get(Logger));
