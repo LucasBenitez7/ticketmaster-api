@@ -64,3 +64,6 @@ postman/results.html
 
 # Payment
 stripe.exe
+
+# Test files
+test-ws.html

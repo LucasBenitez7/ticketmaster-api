@@ -16,6 +16,7 @@ import {
   RefundPolicy,
 } from '../generated/prisma/client/client';
 import { QueuesService } from '../queues/queues.service';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
 
 const ORDER_EXPIRY_MINUTES = 15;
 
@@ -28,10 +29,19 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly queuesService: QueuesService,
+    private readonly wsGateway: WebsocketGateway,
   ) {
     this.stripe = new Stripe(
       this.config.get<string>('STRIPE_SECRET_KEY') ?? '',
     );
+  }
+
+  private async emitStockForEvent(eventId: string) {
+    const categories = await this.prisma.ticketCategory.findMany({
+      where: { eventId },
+      select: { id: true, name: true, availableStock: true },
+    });
+    this.wsGateway.emitStockUpdate(eventId, categories);
   }
 
   async checkout(dto: CheckoutDto, user: AuthUser) {
@@ -277,6 +287,8 @@ export class OrdersService {
       `📧 [EMAIL] Refund confirmation | To: ${user.email} | Order: ${orderId} | Amount: $${refundAmount} (${refundPercentage}%)`,
     );
 
+    await this.emitStockForEvent(order.eventId);
+
     return {
       orderId: updatedOrder.id,
       refundAmount,
@@ -307,6 +319,8 @@ export class OrdersService {
     this.logger.log(
       `📧 [EMAIL] Order expired | Order: ${orderId} | User: ${order.userId}`,
     );
+
+    await this.emitStockForEvent(order.eventId);
 
     return true;
   }

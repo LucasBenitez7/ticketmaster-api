@@ -9,6 +9,8 @@ import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { RedisModule } from './redis/redis.module';
+import { WebsocketModule } from './websocket/websocket.module';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -46,6 +48,8 @@ const isDev = process.env.NODE_ENV !== 'production';
     PrismaModule,
     StorageModule,
     WebhooksModule,
+    RedisModule,
+    WebsocketModule,
   ],
 })
 export class AppModule {}
