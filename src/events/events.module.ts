@@ -4,9 +4,10 @@ import { EventsController } from './events.controller';
 import { StorageModule } from '../storage/storage.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
+import { OrdersModule } from '../orders/orders.module';
 
 @Module({
-  imports: [PrismaModule, StorageModule, RedisModule],
+  imports: [PrismaModule, StorageModule, RedisModule, OrdersModule],
   controllers: [EventsController],
   providers: [EventsService],
   exports: [EventsService],

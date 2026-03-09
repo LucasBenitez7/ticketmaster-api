@@ -2,21 +2,33 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { EMAIL_QUEUE } from '../queues.constants';
-import { EmailJobData, JOB_SEND_EMAIL } from '../queues.service';
+import { JOB_SEND_EMAIL } from '../queues.service';
+import { EmailService } from '../../email/email.service';
+import { EmailPayload } from '../../email/email.types';
 
 @Processor(EMAIL_QUEUE)
 export class EmailProcessor extends WorkerHost {
   private readonly logger = new Logger(EmailProcessor.name);
 
-  process(job: Job<EmailJobData>): Promise<void> {
-    if (job.name !== JOB_SEND_EMAIL) return Promise.resolve();
+  constructor(private readonly emailService: EmailService) {
+    super();
+  }
 
-    const { to, subject, orderId, eventTitle, userName } = job.data;
+  async process(job: Job<EmailPayload>): Promise<void> {
+    if (job.name !== JOB_SEND_EMAIL) return;
 
-    this.logger.log(
-      `📧 [EMAIL] Purchase confirmed | To: ${to} (${userName}) | Order: ${orderId} | Event: ${eventTitle} | Subject: ${subject}`,
+    this.logger.debug(
+      `Processing email job [${job.data.type}] → ${job.data.to}`,
     );
 
-    return Promise.resolve();
+    try {
+      await this.emailService.send(job.data);
+    } catch (err) {
+      this.logger.error(
+        `❌ Email job failed [${job.data.type}] → ${job.data.to}`,
+        err,
+      );
+      throw err;
+    }
   }
 }
