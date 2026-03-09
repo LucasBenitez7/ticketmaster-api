@@ -2,20 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ORDER_EXPIRY_QUEUE, EMAIL_QUEUE } from './queues.constants';
+import { EmailPayload } from '../email/email.types';
 
 export const JOB_ORDER_EXPIRY = 'order-expiry';
 export const JOB_SEND_EMAIL = 'send-email';
 
 export interface OrderExpiryJobData {
   orderId: string;
-}
-
-export interface EmailJobData {
-  to: string;
-  subject: string;
-  orderId: string;
-  eventTitle: string;
-  userName: string;
 }
 
 @Injectable()
@@ -39,8 +32,9 @@ export class QueuesService {
     );
   }
 
-  async addEmailJob(data: EmailJobData): Promise<void> {
-    await this.emailQueue.add(JOB_SEND_EMAIL, data, {
+  async addEmailJob(payload: EmailPayload, delayMs = 0): Promise<void> {
+    await this.emailQueue.add(JOB_SEND_EMAIL, payload, {
+      delay: delayMs,
       attempts: 3,
       backoff: { type: 'exponential', delay: 3000 },
       removeOnComplete: true,

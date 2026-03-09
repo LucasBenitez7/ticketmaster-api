@@ -2,7 +2,9 @@ import { Controller, Post, Req, Headers, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
+import { SkipThrottle } from '@nestjs/throttler';
 
+@SkipThrottle()
 @ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {

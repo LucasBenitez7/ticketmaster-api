@@ -13,6 +13,7 @@ import { PaginateEventsDto } from './dto/paginate-events.dto';
 import { EventStatus, OrderStatus } from '../generated/prisma/client/client';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { QueuesService } from '../queues/queues.service';
 
 const CACHE_TTL = 60;
 const CACHE_PREFIX = 'events:list';
@@ -24,6 +25,7 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly queuesService: QueuesService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -153,31 +155,51 @@ export class EventsService {
   async updateStatus(id: string, status: EventStatus) {
     const event = await this.findOne(id);
 
-    let result: Awaited<ReturnType<typeof this.prisma.event.update>>;
-
     if (status === EventStatus.CANCELLED) {
       if (event.status === EventStatus.CANCELLED) {
         throw new BadRequestException('Event is already cancelled');
       }
 
-      result = await this.prisma.$transaction(async (tx) => {
+      // 1. Buscar afectados antes de cancelar
+      const affectedOrders = await this.prisma.order.findMany({
+        where: { eventId: id, status: OrderStatus.PAID },
+        include: { user: { select: { email: true, name: true } } },
+      });
+
+      // 2. Transacción — actualizar órdenes y evento
+      const updatedEvent = await this.prisma.$transaction(async (tx) => {
         await tx.order.updateMany({
           where: { eventId: id, status: OrderStatus.PAID },
           data: { status: OrderStatus.CANCELLED },
         });
+
         return tx.event.update({
           where: { id },
           data: { status },
           include: { ticketCategories: true },
         });
       });
-    } else {
-      result = await this.prisma.event.update({
-        where: { id },
-        data: { status },
-        include: { ticketCategories: true },
-      });
+
+      // 3. Emails fuera de la transacción
+      for (const affected of affectedOrders) {
+        await this.queuesService.addEmailJob({
+          type: 'cancelled',
+          to: affected.user.email,
+          userName: affected.user.name,
+          eventTitle: event.title,
+          eventDate: event.date,
+        });
+      }
+
+      await this.invalidateCache();
+      return updatedEvent;
     }
+
+    const result = await this.prisma.event.update({
+      where: { id },
+      data: { status },
+      include: { ticketCategories: true },
+    });
 
     await this.invalidateCache();
     return result;

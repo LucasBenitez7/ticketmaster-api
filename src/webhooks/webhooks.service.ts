@@ -96,11 +96,16 @@ export class WebhooksService {
     );
 
     await this.queuesService.addEmailJob({
+      type: 'purchase',
       to: order.user.email,
-      subject: `Confirmación de compra — ${order.event.title}`,
+      userName: order.user.name,
       orderId: order.id,
       eventTitle: order.event.title,
-      userName: order.user.name,
+      eventDate: order.event.date,
+      eventLocation: order.event.location,
+      quantity: order.quantity,
+      totalAmount: Number(order.totalAmount),
+      categoryName: order.category.name,
     });
 
     // Emitir stock actualizado

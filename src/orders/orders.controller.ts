@@ -13,6 +13,7 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthUser } from '../auth/strategies/jwt.strategy';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -21,6 +22,7 @@ import { AuthUser } from '../auth/strategies/jwt.strategy';
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @Post('checkout')
   @ApiOperation({ summary: 'Checkout and create an order' })
   checkout(@Body() dto: CheckoutDto, @CurrentUser() user: AuthUser) {

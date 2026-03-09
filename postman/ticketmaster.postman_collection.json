@@ -42,7 +42,7 @@
               "listen": "prerequest",
               "script": {
                 "exec": [
-                  "pm.environment.set('customerEmail', 'newman_' + Date.now() + '@test.com');"
+                  "pm.environment.set('customerEmail', 'lucaspy1943@icloud.com');"
                 ]
               }
             },

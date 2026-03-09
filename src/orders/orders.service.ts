@@ -19,6 +19,7 @@ import { QueuesService } from '../queues/queues.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 
 const ORDER_EXPIRY_MINUTES = 15;
+const REMINDER_HOURS_BEFORE = 24;
 
 @Injectable()
 export class OrdersService {
@@ -47,7 +48,6 @@ export class OrdersService {
   async checkout(dto: CheckoutDto, user: AuthUser) {
     const { categoryId, quantity } = dto;
 
-    // 1. Verificar que la categoría y el evento existen
     const category = await this.prisma.ticketCategory.findUnique({
       where: { id: categoryId },
       include: { event: true },
@@ -61,9 +61,7 @@ export class OrdersService {
 
     const expiresAt = new Date(Date.now() + ORDER_EXPIRY_MINUTES * 60 * 1000);
 
-    // 2. TRANSACCIÓN ACID — incluye validación de límite por usuario y stock
     const order = await this.prisma.$transaction(async (tx) => {
-      // Re-leer categoría dentro de la transacción para evitar race conditions
       const freshCategory = await tx.ticketCategory.findUnique({
         where: { id: categoryId },
       });
@@ -71,14 +69,12 @@ export class OrdersService {
       if (!freshCategory)
         throw new NotFoundException('Ticket category not found');
 
-      // Verificar stock
       if (freshCategory.availableStock < quantity) {
         throw new BadRequestException(
           `Not enough tickets. Requested: ${quantity}, Available: ${freshCategory.availableStock}`,
         );
       }
 
-      // Verificar límite por usuario DENTRO de la transacción
       const userTickets = await tx.order.aggregate({
         where: {
           userId: user.id,
@@ -98,7 +94,6 @@ export class OrdersService {
 
       const totalAmount = Number(freshCategory.price) * quantity;
 
-      // Crear orden con tickets
       const newOrder = await tx.order.create({
         data: {
           userId: user.id,
@@ -118,7 +113,6 @@ export class OrdersService {
         include: { tickets: true },
       });
 
-      // Restar stock atómicamente
       await tx.ticketCategory.update({
         where: { id: categoryId },
         data: { availableStock: { decrement: quantity } },
@@ -127,17 +121,13 @@ export class OrdersService {
       return newOrder;
     });
 
-    // 3. Crear Payment Intent en Stripe — manejar fallo revirtiendo la orden
     let paymentIntent: Stripe.PaymentIntent;
 
     try {
       paymentIntent = await this.stripe.paymentIntents.create({
         amount: Math.round(Number(order.totalAmount) * 100),
         currency: 'usd',
-        automatic_payment_methods: {
-          enabled: true,
-          allow_redirects: 'never',
-        },
+        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
         metadata: {
           orderId: order.id,
           userId: user.id,
@@ -146,7 +136,6 @@ export class OrdersService {
         },
       });
     } catch (error) {
-      // Si Stripe falla, revertir la orden y devolver stock
       this.logger.error(
         'Stripe PaymentIntent creation failed, reverting order',
         error,
@@ -158,7 +147,6 @@ export class OrdersService {
             where: { id: order.id },
             data: { status: OrderStatus.FAILED },
           });
-
           await tx.ticketCategory.update({
             where: { id: categoryId },
             data: { availableStock: { increment: quantity } },
@@ -166,7 +154,7 @@ export class OrdersService {
         });
       } catch (rollbackError) {
         this.logger.error(
-          `CRITICAL: Failed to revert order ${order.id} after Stripe failure. Stock may be inconsistent. Manual reconciliation required.`,
+          `CRITICAL: Failed to revert order ${order.id} after Stripe failure.`,
           rollbackError,
         );
       }
@@ -176,19 +164,34 @@ export class OrdersService {
       );
     }
 
-    // 4. Guardar Payment Intent ID
     await this.prisma.order.update({
       where: { id: order.id },
       data: { stripePaymentIntentId: paymentIntent.id },
     });
 
-    this.logger.log(
-      `📧 [EMAIL] Purchase confirmation | To: ${user.email} | Order: ${order.id} | Event: ${category.event.title} | Qty: ${quantity} | Total: $${Number(order.totalAmount)}`,
-    );
-
-    // Encolar job de expiración con delay de 15 minutos
+    // Job de expiración
     const ORDER_EXPIRY_MS = ORDER_EXPIRY_MINUTES * 60 * 1000;
     await this.queuesService.addOrderExpiryJob(order.id, ORDER_EXPIRY_MS);
+
+    // Job de recordatorio 24h antes del evento
+    const reminderDelay =
+      new Date(category.event.date).getTime() -
+      Date.now() -
+      REMINDER_HOURS_BEFORE * 60 * 60 * 1000;
+
+    if (reminderDelay > 0) {
+      await this.queuesService.addEmailJob(
+        {
+          type: 'reminder',
+          to: user.email,
+          userName: user.name,
+          eventTitle: category.event.title,
+          eventDate: category.event.date,
+          eventLocation: category.event.location,
+        },
+        reminderDelay,
+      );
+    }
 
     return {
       orderId: order.id,
@@ -217,7 +220,6 @@ export class OrdersService {
       throw new ForbiddenException('This ticket category is non-refundable');
     }
 
-    // Verificar deadline de reembolso
     const eventDate = new Date(order.event.date);
     const deadlineMs = order.category.refundDeadlineHours * 60 * 60 * 1000;
     const refundDeadline = new Date(eventDate.getTime() - deadlineMs);
@@ -236,7 +238,6 @@ export class OrdersService {
     const refundAmount = (Number(order.totalAmount) * refundPercentage) / 100;
     const isPartial = refundPercentage < 100;
 
-    // Procesar reembolso en Stripe
     try {
       await this.stripe.refunds.create({
         payment_intent: order.stripePaymentIntentId,
@@ -249,7 +250,6 @@ export class OrdersService {
       );
     }
 
-    // Actualizar orden y devolver stock atómicamente
     let updatedOrder: Awaited<ReturnType<typeof this.prisma.order.update>>;
 
     try {
@@ -272,9 +272,8 @@ export class OrdersService {
         return updated;
       });
     } catch (error) {
-      // Stripe ya procesó el refund pero la BD falló — requiere reconciliación manual
       this.logger.error(
-        `CRITICAL: Stripe refund processed for order ${orderId} (paymentIntent: ${order.stripePaymentIntentId}, amount: ${refundAmount}) but DB update failed. Manual reconciliation required.`,
+        `CRITICAL: Stripe refund processed for order ${orderId} but DB update failed. Manual reconciliation required.`,
         error,
       );
       throw new BadRequestException(
@@ -282,10 +281,15 @@ export class OrdersService {
       );
     }
 
-    // EMAIL LOG — confirmación de reembolso
-    this.logger.log(
-      `📧 [EMAIL] Refund confirmation | To: ${user.email} | Order: ${orderId} | Amount: $${refundAmount} (${refundPercentage}%)`,
-    );
+    await this.queuesService.addEmailJob({
+      type: 'refund',
+      to: user.email,
+      userName: user.name,
+      orderId,
+      eventTitle: order.event.title,
+      refundAmount,
+      refundPercentage,
+    });
 
     await this.emitStockForEvent(order.eventId);
 
@@ -300,6 +304,10 @@ export class OrdersService {
   async expireOrder(orderId: string): Promise<boolean> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
+      include: {
+        user: { select: { email: true, name: true } },
+        event: { select: { title: true } },
+      },
     });
 
     if (!order || order.status !== OrderStatus.PENDING) return false;
@@ -309,16 +317,19 @@ export class OrdersService {
         where: { id: orderId },
         data: { status: OrderStatus.EXPIRED },
       });
-
       await tx.ticketCategory.update({
         where: { id: order.categoryId },
         data: { availableStock: { increment: order.quantity } },
       });
     });
 
-    this.logger.log(
-      `📧 [EMAIL] Order expired | Order: ${orderId} | User: ${order.userId}`,
-    );
+    await this.queuesService.addEmailJob({
+      type: 'expired',
+      to: order.user.email,
+      userName: order.user.name,
+      orderId,
+      eventTitle: order.event.title,
+    });
 
     await this.emitStockForEvent(order.eventId);
 
