@@ -3,9 +3,12 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
+import bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  app.use('/webhooks/stripe', bodyParser.raw({ type: 'application/json' }));
 
   // Logger estructurado
   app.useLogger(app.get(Logger));

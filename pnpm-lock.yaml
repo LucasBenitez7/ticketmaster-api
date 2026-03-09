@@ -114,6 +114,9 @@ importers:
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
+      '@types/body-parser':
+        specifier: ^1.19.6
+        version: 1.19.6
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6

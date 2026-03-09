@@ -8,6 +8,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -44,6 +45,7 @@ const isDev = process.env.NODE_ENV !== 'production';
     OrdersModule,
     PrismaModule,
     StorageModule,
+    WebhooksModule,
   ],
 })
 export class AppModule {}
