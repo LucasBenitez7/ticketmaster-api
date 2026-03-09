@@ -10,6 +10,11 @@ datasource db {
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
 enum EventStatus {
   DRAFT
   PUBLISHED
@@ -41,6 +46,7 @@ model User {
   email     String   @unique
   password  String
   name      String
+  role      Role       @default(CUSTOMER)
   orders    Order[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

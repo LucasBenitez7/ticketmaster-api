@@ -168,6 +168,10 @@ export class OrdersService {
       data: { stripePaymentIntentId: paymentIntent.id },
     });
 
+    this.logger.log(
+      `📧 [EMAIL] Purchase confirmation | To: ${user.email} | Order: ${order.id} | Event: ${category.event.title} | Qty: ${quantity} | Total: $${Number(order.totalAmount)}`,
+    );
+
     // Encolar job de expiración con delay de 15 minutos
     const ORDER_EXPIRY_MS = ORDER_EXPIRY_MINUTES * 60 * 1000;
     await this.queuesService.addOrderExpiryJob(order.id, ORDER_EXPIRY_MS);
@@ -264,6 +268,11 @@ export class OrdersService {
       );
     }
 
+    // EMAIL LOG — confirmación de reembolso
+    this.logger.log(
+      `📧 [EMAIL] Refund confirmation | To: ${user.email} | Order: ${orderId} | Amount: $${refundAmount} (${refundPercentage}%)`,
+    );
+
     return {
       orderId: updatedOrder.id,
       refundAmount,
@@ -290,6 +299,10 @@ export class OrdersService {
         data: { availableStock: { increment: order.quantity } },
       });
     });
+
+    this.logger.log(
+      `📧 [EMAIL] Order expired | Order: ${orderId} | User: ${order.userId}`,
+    );
 
     return true;
   }

@@ -2,12 +2,15 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { Role } from '../generated/prisma/client/client';
 
 @Injectable()
 export class AuthService {
@@ -31,7 +34,7 @@ export class AuthService {
       data: { name: dto.name, email: normalizedEmail, password: hashed },
     });
 
-    const token = this.signToken(user.id, user.email);
+    const token = this.signToken(user.id, user.email, user.role);
     return { accessToken: token };
   }
 
@@ -47,11 +50,31 @@ export class AuthService {
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials');
 
-    const token = this.signToken(user.id, user.email);
+    const token = this.signToken(user.id, user.email, user.role);
     return { accessToken: token };
   }
 
-  private signToken(userId: string, email: string) {
-    return this.jwt.sign({ sub: userId, email });
+  async changeRole(targetUserId: string, newRole: Role) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.role === newRole) {
+      throw new BadRequestException(`User already has role ${newRole}`);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { role: newRole },
+      select: { id: true, email: true, name: true, role: true },
+    });
+
+    return updated;
+  }
+
+  private signToken(userId: string, email: string, role: Role) {
+    return this.jwt.sign({ sub: userId, email, role });
   }
 }
