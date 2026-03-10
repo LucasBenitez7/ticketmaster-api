@@ -92,8 +92,8 @@ jobs:
           ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
           ./mc mb myminio/ticketmaster --ignore-existing
 
-      - name: Create .env for seed
-        run: touch .env
+      - name: Create .env
+        run: echo "DATABASE_URL=postgresql://admin:adminpassword@localhost:5435/ticket_db" > .env
 
       - name: Seed database
         run: pnpm db:seed
@@ -105,9 +105,8 @@ jobs:
 
       - name: Build API
         run: |
-          pnpm db:generate
-          pnpm build
-          ls -la dist/ || { echo "dist/ not found after build!"; exit 1; }
+          pnpm build 2>&1 | tee /tmp/build.log
+          ls -la dist/main.js || { echo "dist/main.js not found! Build output:"; cat /tmp/build.log; exit 1; }
         env:
           DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
 
