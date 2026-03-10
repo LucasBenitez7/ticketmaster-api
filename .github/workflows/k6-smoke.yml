@@ -36,6 +36,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      minio:
+        image: minio/minio
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,6 +86,13 @@ jobs:
         env:
           DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
 
+      - name: Create MinIO bucket
+        run: |
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O mc
+          chmod +x mc
+          ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
+          ./mc mb myminio/ticketmaster --ignore-existing
+
       - name: Create .env for seed
         run: touch .env
 
@@ -95,7 +110,9 @@ jobs:
           DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
 
       - name: Start API
-        run: pnpm start:prod &
+        run: |
+          nohup pnpm start:prod > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
         env:
           PORT: 3000
           NODE_ENV: production
@@ -123,11 +140,14 @@ jobs:
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3000/events?page=1\&limit=1 > /dev/null 2>&1; then
               echo "API is up!"
-              break
+              exit 0
             fi
             echo "Attempt $i/30..."
             sleep 2
           done
+          echo "API failed to start. Log:"
+          cat /tmp/api.log 2>/dev/null || true
+          exit 1
 
       - name: Run k6 smoke test (10 VUs, ramp-up scenario)
         run: |
