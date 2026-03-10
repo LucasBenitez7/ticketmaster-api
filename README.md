@@ -320,7 +320,9 @@ El escenario 4 (`scenario4-acid.js`) simula 50 usuarios comprando 1 ticket en un
 
 Swagger UI está disponible en:
 
-**http://localhost:3000/api/docs**
+**https://ticket.lsbstack.com/api/docs** (producción)
+
+**http://localhost:3000/api/docs** (desarrollo local)
 
 Cuando la API está corriendo, puedes explorar todos los endpoints, autenticarte con Bearer token y probar las peticiones desde el navegador.
 
