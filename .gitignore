@@ -67,3 +67,6 @@ stripe.exe
 
 # Test files
 test-ws.html
+
+# k6
+k6/results/

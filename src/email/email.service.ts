@@ -22,6 +22,12 @@ export class EmailService {
   }
 
   async send(payload: EmailPayload): Promise<void> {
+    const emailEnabled = this.config.get<string>('EMAIL_ENABLED') === 'true';
+    if (!emailEnabled) {
+      this.logger.log(`[DEV] Email skipped [${payload.type}] → ${payload.to}`);
+      return;
+    }
+
     const { subject, html } = this.buildEmail(payload);
 
     try {

@@ -28,7 +28,12 @@ import { Throttle } from '@nestjs/throttler';
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
-  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Throttle({
+    global: {
+      ttl: 60000,
+      limit: parseInt(process.env.THROTTLE_CHECKOUT_LIMIT || '10', 10),
+    },
+  })
   @Post('checkout')
   @ApiOperation({
     summary: 'Checkout and create an order',

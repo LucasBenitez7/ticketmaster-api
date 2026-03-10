@@ -21,7 +21,20 @@ const isDev = process.env.NODE_ENV !== 'production';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
 
-    ThrottlerModule.forRoot([{ name: 'global', ttl: 60000, limit: 100 }]),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const limit = parseInt(
+          config.get<string>('THROTTLE_GLOBAL_LIMIT') ?? '100',
+          10,
+        );
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[Throttler] Global limit: ${limit} req/min`);
+        }
+        return [{ name: 'global', ttl: 60000, limit }];
+      },
+    }),
 
     BullModule.forRootAsync({
       imports: [ConfigModule],
