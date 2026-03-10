@@ -111,6 +111,23 @@ const mockPaymentIntent = {
   client_secret: 'pi_mock_123_secret_abc',
 };
 
+// ─── tx mock factory ──────────────────────────────────────────────────────────
+// El service usa tx.$executeRaw (tagged template literal) dentro de la transacción.
+// Devuelve 1 por defecto (stock decrementado correctamente).
+
+const buildTxMock = (executeRawResult = 1) => ({
+  ticketCategory: {
+    findUnique: jest.fn().mockResolvedValue(mockCategory),
+    update: jest.fn().mockResolvedValue({}),
+  },
+  order: {
+    aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    create: jest.fn().mockResolvedValue({ ...mockOrder }),
+  },
+  ticket: { deleteMany: jest.fn().mockResolvedValue({}) },
+  $executeRaw: jest.fn().mockResolvedValue(executeRawResult),
+});
+
 // ─── Suite ────────────────────────────────────────────────────────────────────
 
 describe('OrdersService', () => {
@@ -137,21 +154,11 @@ describe('OrdersService', () => {
     const dto = { categoryId: 'cat-uuid-1', quantity: 2 };
 
     beforeEach(() => {
-      // Default happy path mocks
       mockPrisma.ticketCategory.findUnique.mockResolvedValue(mockCategory);
+      // Default happy path: $transaction calls fn with a tx that has $executeRaw returning 1
       mockPrisma.$transaction.mockImplementation(
-        async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
-          // Simulate inner transaction: re-fetch category + aggregate + create order + update stock
-          mockPrisma.ticketCategory.findUnique.mockResolvedValueOnce(
-            mockCategory,
-          );
-          mockPrisma.order.aggregate.mockResolvedValueOnce({
-            _sum: { quantity: 0 },
-          });
-          mockPrisma.order.create.mockResolvedValueOnce({ ...mockOrder });
-          mockPrisma.ticketCategory.update.mockResolvedValueOnce({});
-          return fn(mockPrisma);
-        },
+        async (fn: (tx: ReturnType<typeof buildTxMock>) => Promise<unknown>) =>
+          fn(buildTxMock(1)),
       );
       mockStripePaymentIntentsCreate.mockResolvedValue(mockPaymentIntent);
       mockPrisma.order.update.mockResolvedValue({});
@@ -189,15 +196,17 @@ describe('OrdersService', () => {
       );
     });
 
-    it('should throw BadRequestException if not enough stock', async () => {
-      mockPrisma.ticketCategory.findUnique.mockResolvedValue(mockCategory);
+    it('should throw BadRequestException if not enough stock ($executeRaw returns 0)', async () => {
       mockPrisma.$transaction.mockImplementation(
-        async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
-          mockPrisma.ticketCategory.findUnique.mockResolvedValueOnce({
+        async (
+          fn: (tx: ReturnType<typeof buildTxMock>) => Promise<unknown>,
+        ) => {
+          const tx = buildTxMock(0); // 0 = no rows updated = no stock
+          tx.ticketCategory.findUnique.mockResolvedValue({
             ...mockCategory,
-            availableStock: 1, // less than requested quantity=2
+            availableStock: 1,
           });
-          return fn(mockPrisma);
+          return fn(tx);
         },
       );
 
@@ -207,17 +216,14 @@ describe('OrdersService', () => {
     });
 
     it('should throw BadRequestException if user exceeds maxTicketsPerUser', async () => {
-      mockPrisma.ticketCategory.findUnique.mockResolvedValue(mockCategory);
       mockPrisma.$transaction.mockImplementation(
-        async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
-          mockPrisma.ticketCategory.findUnique.mockResolvedValueOnce(
-            mockCategory,
-          );
+        async (
+          fn: (tx: ReturnType<typeof buildTxMock>) => Promise<unknown>,
+        ) => {
+          const tx = buildTxMock(1);
           // User already has 3 tickets, maxTicketsPerUser=4, requesting 2 → total 5 > 4
-          mockPrisma.order.aggregate.mockResolvedValueOnce({
-            _sum: { quantity: 3 },
-          });
-          return fn(mockPrisma);
+          tx.order.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+          return fn(tx);
         },
       );
 
@@ -231,25 +237,17 @@ describe('OrdersService', () => {
         new Error('Stripe error'),
       );
 
-      // Rollback transaction
       const rollbackTx = {
-        ticket: { deleteMany: jest.fn() },
-        order: { update: jest.fn() },
-        ticketCategory: { update: jest.fn() },
+        ticket: { deleteMany: jest.fn().mockResolvedValue({}) },
+        order: { update: jest.fn().mockResolvedValue({}) },
+        ticketCategory: { update: jest.fn().mockResolvedValue({}) },
       };
+
       mockPrisma.$transaction
         .mockImplementationOnce(
-          async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
-            mockPrisma.ticketCategory.findUnique.mockResolvedValueOnce(
-              mockCategory,
-            );
-            mockPrisma.order.aggregate.mockResolvedValueOnce({
-              _sum: { quantity: 0 },
-            });
-            mockPrisma.order.create.mockResolvedValueOnce({ ...mockOrder });
-            mockPrisma.ticketCategory.update.mockResolvedValueOnce({});
-            return fn(mockPrisma);
-          },
+          async (
+            fn: (tx: ReturnType<typeof buildTxMock>) => Promise<unknown>,
+          ) => fn(buildTxMock(1)),
         )
         .mockImplementationOnce(
           async (fn: (tx: typeof rollbackTx) => Promise<unknown>) =>
@@ -357,8 +355,7 @@ describe('OrdersService', () => {
     });
 
     it('should throw BadRequestException if refund deadline has passed', async () => {
-      // Event is in 10 hours, deadline is 48h before → deadline already passed
-      const soonEvent = new Date(Date.now() + 10 * 60 * 60 * 1000);
+      const soonEvent = new Date(Date.now() + 10 * 60 * 60 * 1000); // 10h from now, deadline is 48h before
       mockPrisma.order.findFirst.mockResolvedValue({
         ...paidOrder,
         event: { ...paidOrder.event, date: soonEvent },
@@ -431,7 +428,7 @@ describe('OrdersService', () => {
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('should return false if order is not PENDING (already PAID, EXPIRED, etc.)', async () => {
+    it('should return false if order is not PENDING', async () => {
       mockPrisma.order.findUnique.mockResolvedValue({
         ...mockOrder,
         status: OrderStatus.PAID,
@@ -464,9 +461,7 @@ describe('OrdersService', () => {
 
     it('should return empty array if user has no orders', async () => {
       mockPrisma.order.findMany.mockResolvedValue([]);
-
       const result = await service.findMyOrders(mockUser.id);
-
       expect(result).toEqual([]);
     });
   });

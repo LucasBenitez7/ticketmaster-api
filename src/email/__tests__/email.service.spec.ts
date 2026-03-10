@@ -30,12 +30,13 @@ jest.mock('../templates/cancelled.template', () => ({
   cancelledTemplate: jest.fn().mockReturnValue('<html>cancelled</html>'),
 }));
 
-// ─── Dependency mocks ─────────────────────────────────────────────────────────
+// ─── Config mock — EMAIL_ENABLED=true para que no salga antes de Resend ──────
 
 const mockConfig = {
   get: jest.fn((key: string) => {
     if (key === 'RESEND_API_KEY') return 're_test_mock';
     if (key === 'RESEND_FROM') return 'Test <test@example.com>';
+    if (key === 'EMAIL_ENABLED') return 'true';
     return undefined;
   }),
 };
@@ -89,6 +90,7 @@ const baseCancelledPayload = {
   to: 'john@example.com',
   userName: 'John',
   eventTitle: 'Rock Festival',
+  eventDate: futureDate,
 };
 
 // ─── Suite ────────────────────────────────────────────────────────────────────
@@ -97,6 +99,16 @@ describe('EmailService', () => {
   let service: EmailService;
 
   beforeEach(async () => {
+    // Restaurar mock ANTES de crear el módulo (el constructor lee config al instanciar)
+    (mockConfig.get as jest.Mock<string | undefined>).mockImplementation(
+      (key: string) => {
+        if (key === 'RESEND_API_KEY') return 're_test_mock';
+        if (key === 'RESEND_FROM') return 'Test <test@example.com>';
+        if (key === 'EMAIL_ENABLED') return 'true';
+        return undefined;
+      },
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EmailService,
@@ -106,6 +118,41 @@ describe('EmailService', () => {
 
     service = module.get<EmailService>(EmailService);
     jest.clearAllMocks();
+
+    // Re-aplicar mock tras clearAllMocks (no borra implementation, pero por si acaso)
+    (mockConfig.get as jest.Mock<string | undefined>).mockImplementation(
+      (key: string) => {
+        if (key === 'RESEND_API_KEY') return 're_test_mock';
+        if (key === 'RESEND_FROM') return 'Test <test@example.com>';
+        if (key === 'EMAIL_ENABLED') return 'true';
+        return undefined;
+      },
+    );
+  });
+
+  // ─── EMAIL_ENABLED guard ───────────────────────────────────────────────────
+
+  describe('EMAIL_ENABLED guard', () => {
+    it('should skip sending if EMAIL_ENABLED is not "true"', async () => {
+      (mockConfig.get as jest.Mock<string | undefined>).mockImplementation(
+        (key: string) => {
+          if (key === 'EMAIL_ENABLED') return 'false';
+          return undefined;
+        },
+      );
+
+      await service.send(basePurchasePayload);
+
+      expect(mockResendEmailsSend).not.toHaveBeenCalled();
+    });
+
+    it('should skip sending if EMAIL_ENABLED is undefined', async () => {
+      (mockConfig.get as jest.Mock).mockImplementation(() => undefined);
+
+      await service.send(basePurchasePayload);
+
+      expect(mockResendEmailsSend).not.toHaveBeenCalled();
+    });
   });
 
   // ─── send ──────────────────────────────────────────────────────────────────
@@ -120,24 +167,27 @@ describe('EmailService', () => {
         expect.objectContaining({
           from: 'Test <test@example.com>',
           to: basePurchasePayload.to,
-          subject: expect.stringContaining(basePurchasePayload.eventTitle),
-          html: expect.any(String),
+          subject: expect.stringContaining(
+            basePurchasePayload.eventTitle,
+          ) as string,
+          html: expect.any(String) as string,
         }),
       );
     });
 
     it('should use default from address when RESEND_FROM is not configured', async () => {
-      const configWithoutFrom = {
-        get: jest.fn((key: string) => {
+      (mockConfig.get as jest.Mock<string | undefined>).mockImplementation(
+        (key: string) => {
           if (key === 'RESEND_API_KEY') return 're_test_mock';
-          return undefined;
-        }),
-      };
+          if (key === 'EMAIL_ENABLED') return 'true';
+          return undefined; // RESEND_FROM not set
+        },
+      );
 
       const moduleNoFrom = await Test.createTestingModule({
         providers: [
           EmailService,
-          { provide: ConfigService, useValue: configWithoutFrom },
+          { provide: ConfigService, useValue: mockConfig },
         ],
       }).compile();
 
@@ -153,7 +203,7 @@ describe('EmailService', () => {
       );
     });
 
-    it('should throw and log error if resend returns an error object', async () => {
+    it('should throw if resend returns an error object', async () => {
       mockResendEmailsSend.mockResolvedValue({
         error: { message: 'Invalid API key' },
       });
@@ -163,7 +213,7 @@ describe('EmailService', () => {
       );
     });
 
-    it('should throw and rethrow if resend.emails.send rejects', async () => {
+    it('should rethrow if resend.emails.send rejects', async () => {
       mockResendEmailsSend.mockRejectedValue(new Error('Network failure'));
 
       await expect(service.send(basePurchasePayload)).rejects.toThrow(
@@ -172,7 +222,7 @@ describe('EmailService', () => {
     });
   });
 
-  // ─── buildEmail (via send) ─────────────────────────────────────────────────
+  // ─── buildEmail — subject and template selection ───────────────────────────
 
   describe('buildEmail — subject and template selection', () => {
     beforeEach(() => {
@@ -224,7 +274,7 @@ describe('EmailService', () => {
     });
 
     it('should use cancelledTemplate and correct subject for type "cancelled"', async () => {
-      await service.send({ ...baseCancelledPayload, eventDate: new Date() });
+      await service.send(baseCancelledPayload);
 
       expect(mockResendEmailsSend).toHaveBeenCalledWith(
         expect.objectContaining({

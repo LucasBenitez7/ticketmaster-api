@@ -49,7 +49,7 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
-  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Throttle({ global: { ttl: 60000, limit: 5 } })
   @Post('login')
   @ApiOperation({
     summary: 'Login',

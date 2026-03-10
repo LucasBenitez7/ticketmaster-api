@@ -61,12 +61,6 @@ export class OrdersService {
       if (!freshCategory)
         throw new NotFoundException('Ticket category not found');
 
-      if (freshCategory.availableStock < quantity) {
-        throw new BadRequestException(
-          `Not enough tickets. Requested: ${quantity}, Available: ${freshCategory.availableStock}`,
-        );
-      }
-
       const userTickets = await tx.order.aggregate({
         where: {
           userId: user.id,
@@ -81,6 +75,23 @@ export class OrdersService {
       if (alreadyOwned + quantity > freshCategory.maxTicketsPerUser) {
         throw new BadRequestException(
           `Max tickets per user for this category is ${freshCategory.maxTicketsPerUser}. You already have ${alreadyOwned}.`,
+        );
+      }
+
+      // Atomic decrement: solo actualiza si hay stock suficiente (evita sobreventa)
+      const updated = await tx.$executeRaw`
+        UPDATE ticket_categories
+        SET "availableStock" = "availableStock" - ${quantity}
+        WHERE id = ${categoryId} AND "availableStock" >= ${quantity}
+      `;
+
+      if (updated === 0) {
+        const current = await tx.ticketCategory.findUnique({
+          where: { id: categoryId },
+          select: { availableStock: true },
+        });
+        throw new BadRequestException(
+          `Not enough tickets. Requested: ${quantity}, Available: ${current?.availableStock ?? 0}`,
         );
       }
 
@@ -103,11 +114,6 @@ export class OrdersService {
           },
         },
         include: { tickets: true },
-      });
-
-      await tx.ticketCategory.update({
-        where: { id: categoryId },
-        data: { availableStock: { decrement: quantity } },
       });
 
       return newOrder;
