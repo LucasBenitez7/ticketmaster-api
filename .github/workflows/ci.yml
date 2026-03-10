@@ -48,6 +48,6 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit Tests
-        run: pnpm test -- --ci --passWithNoTests
+        run: pnpm exec jest --ci --passWithNoTests
         env:
           NODE_ENV: test
