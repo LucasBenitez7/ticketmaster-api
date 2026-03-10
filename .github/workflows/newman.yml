@@ -104,13 +104,15 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
 
       - name: Build API
-        run: pnpm build
+        run: |
+          pnpm build
+          ls -la dist/ || { echo "dist/ not found after build!"; exit 1; }
         env:
           DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
 
       - name: Start API
         run: |
-          nohup pnpm start:prod > /tmp/api.log 2>&1 &
+          nohup node dist/main > /tmp/api.log 2>&1 &
           echo $! > /tmp/api.pid
         env:
           PORT: 3000
