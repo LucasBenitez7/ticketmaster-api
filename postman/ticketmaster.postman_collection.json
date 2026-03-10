@@ -42,7 +42,8 @@
               "listen": "prerequest",
               "script": {
                 "exec": [
-                  "pm.environment.set('customerEmail', 'lucaspy1943@icloud.com');"
+                  "const unique = Date.now();",
+                  "pm.environment.set('customerEmail', `newman.customer.${unique}@test.com`);"
                 ]
               }
             },
