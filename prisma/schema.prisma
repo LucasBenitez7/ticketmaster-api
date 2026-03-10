@@ -1,8 +1,139 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../node_modules/.prisma/client"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma/client"
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  SOLD_OUT
+  CANCELLED
+  COMPLETED
+}
+
+enum RefundPolicy {
+  REFUNDABLE
+  PARTIAL
+  NON_REFUNDABLE
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  password      String
+  name          String
+  role          Role           @default(CUSTOMER)
+  orders        Order[]
+  refreshTokens RefreshToken[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("users")
+}
+
+model Event {
+  id               String           @id @default(uuid())
+  title            String
+  description      String
+  date             DateTime
+  location         String
+  posterUrl        String?
+  status           EventStatus      @default(DRAFT)
+  ticketCategories TicketCategory[]
+  orders           Order[]
+  tickets          Ticket[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@map("events")
+}
+
+model TicketCategory {
+  id                  String       @id @default(uuid())
+  eventId             String
+  name                String
+  description         String?
+  price               Decimal      @db.Decimal(10, 2)
+  totalStock          Int
+  availableStock      Int
+  maxTicketsPerUser   Int          @default(10)
+  refundPolicy        RefundPolicy @default(REFUNDABLE)
+  refundPercentage    Int          @default(100)
+  refundDeadlineHours Int          @default(48)
+  event               Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orders              Order[]
+  tickets             Ticket[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@map("ticket_categories")
+}
+
+model Order {
+  id                    String         @id @default(uuid())
+  userId                String
+  eventId               String
+  categoryId            String
+  quantity              Int
+  totalAmount           Decimal        @db.Decimal(10, 2)
+  refundAmount          Decimal?       @db.Decimal(10, 2)
+  status                OrderStatus    @default(PENDING)
+  stripePaymentIntentId String?
+  expiresAt             DateTime
+  user                  User           @relation(fields: [userId], references: [id])
+  event                 Event          @relation(fields: [eventId], references: [id])
+  category              TicketCategory @relation(fields: [categoryId], references: [id])
+  tickets               Ticket[]
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@map("orders")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Ticket {
+  id         String         @id @default(uuid())
+  orderId    String
+  eventId    String
+  categoryId String
+  order      Order          @relation(fields: [orderId], references: [id])
+  event      Event          @relation(fields: [eventId], references: [id])
+  category   TicketCategory @relation(fields: [categoryId], references: [id])
+  createdAt  DateTime       @default(now())
+
+  @@map("tickets")
 }

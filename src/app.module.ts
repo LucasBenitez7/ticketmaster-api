@@ -1,26 +1,76 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from './auth/auth.module';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventsModule } from './events/events.module';
 import { LoggerModule } from 'nestjs-pino';
+import { Module } from '@nestjs/common';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { CategoriesModule } from './categories/categories.module';
+import { OrdersModule } from './orders/orders.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { StorageModule } from './storage/storage.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { RedisModule } from './redis/redis.module';
+import { WebsocketModule } from './websocket/websocket.module';
+import { EmailModule } from './email/email.module';
+
+const isDev = process.env.NODE_ENV !== 'production';
 
 @Module({
   imports: [
-    // Config global — disponible en toda la app sin importar en cada módulo
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
 
-    // Logger estructurado global
-    LoggerModule.forRoot({
-      pinoHttp: {
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            singleLine: true,
-          },
-        },
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const limit = parseInt(
+          config.get<string>('THROTTLE_GLOBAL_LIMIT') ?? '100',
+          10,
+        );
+        return [{ name: 'global', ttl: 60000, limit }];
       },
     }),
+
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const password = config.get<string>('REDIS_PASSWORD');
+        return {
+          connection: {
+            host: config.get<string>('REDIS_HOST'),
+            port: parseInt(config.get<string>('REDIS_PORT') ?? '6379', 10),
+            ...(password ? { password } : {}),
+          },
+        };
+      },
+    }),
+
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: isDev ? 'debug' : 'info',
+        transport: isDev
+          ? {
+              target: 'pino-pretty',
+              options: { colorize: true, singleLine: true },
+            }
+          : undefined,
+      },
+    }),
+
+    RedisModule,
+    WebsocketModule,
+    EmailModule,
+    AuthModule,
+    CategoriesModule,
+    EventsModule,
+    OrdersModule,
+    PrismaModule,
+    StorageModule,
+    WebhooksModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
