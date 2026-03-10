@@ -1,0 +1,161 @@
+name: Integration Tests (Newman)
+
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+    branches: [development, main]
+
+jobs:
+  newman:
+    name: Newman API Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: adminpassword
+          POSTGRES_DB: ticket_db
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+        env:
+          DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
+
+      - name: Start MinIO
+        run: |
+          docker run -d \
+            --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO is up!"
+              break
+            fi
+            echo "Waiting for MinIO... attempt $i/15"
+            sleep 2
+          done
+          curl -sf http://localhost:9000/minio/health/live > /dev/null || { echo "MinIO failed to start"; docker logs minio; exit 1; }
+
+      - name: Create MinIO bucket
+        run: |
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O mc
+          chmod +x mc
+          ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
+          ./mc mb myminio/ticketmaster --ignore-existing
+
+      - name: Create .env
+        run: echo "DATABASE_URL=postgresql://admin:adminpassword@localhost:5435/ticket_db" > .env
+
+      - name: Seed database
+        run: pnpm db:seed
+        env:
+          DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
+          ADMIN_NAME: ${{ secrets.ADMIN_NAME }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+
+      - name: Build API
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
+
+      - name: Start API
+        run: |
+          nohup node dist/src/main > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
+        env:
+          PORT: 3000
+          NODE_ENV: production
+          DATABASE_URL: postgresql://admin:adminpassword@localhost:5435/ticket_db
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ACCESS_TOKEN_EXPIRES_IN: 15m
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          S3_ENDPOINT: http://localhost:9000
+          S3_REGION: us-east-1
+          S3_ACCESS_KEY_ID: minioadmin
+          S3_SECRET_ACCESS_KEY: minioadmin
+          S3_BUCKET_NAME: ticketmaster
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          EMAIL_ENABLED: 'false'
+          THROTTLE_GLOBAL_LIMIT: 10000
+          THROTTLE_CHECKOUT_LIMIT: 1000
+          WEBSOCKET_CORS_ORIGIN: '*'
+
+      - name: Wait for API to be ready
+        run: |
+          echo "Waiting for API..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/events?page=1\&limit=1 > /dev/null 2>&1; then
+              echo "API is up!"
+              exit 0
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+          echo "API failed to start. Log:"
+          cat /tmp/api.log 2>/dev/null || true
+          exit 1
+
+      - name: Run Newman tests
+        run: pnpm exec newman run postman/ticketmaster.postman_collection.json -e postman/ticketmaster.postman_environment.json --reporters cli,htmlextra --reporter-htmlextra-export postman/results.html
+
+      - name: Upload Newman report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: postman/results.html
+          retention-days: 7
