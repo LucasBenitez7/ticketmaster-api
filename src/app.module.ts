@@ -29,9 +29,6 @@ const isDev = process.env.NODE_ENV !== 'production';
           config.get<string>('THROTTLE_GLOBAL_LIMIT') ?? '100',
           10,
         );
-        if (process.env.NODE_ENV !== 'production') {
-          console.log(`[Throttler] Global limit: ${limit} req/min`);
-        }
         return [{ name: 'global', ttl: 60000, limit }];
       },
     }),
