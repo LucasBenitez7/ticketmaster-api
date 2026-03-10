@@ -105,6 +105,7 @@ jobs:
 
       - name: Build API
         run: |
+          pnpm db:generate
           pnpm build
           ls -la dist/ || { echo "dist/ not found after build!"; exit 1; }
         env:
