@@ -4,78 +4,94 @@
 [![Newman](https://github.com/LucasBenitez7/ticketmaster-api/actions/workflows/newman.yml/badge.svg)](https://github.com/LucasBenitez7/ticketmaster-api/actions/workflows/newman.yml)
 [![k6 Smoke](https://github.com/LucasBenitez7/ticketmaster-api/actions/workflows/k6-smoke.yml/badge.svg)](https://github.com/LucasBenitez7/ticketmaster-api/actions/workflows/k6-smoke.yml)
 
-API REST para venta de entradas con alta escalabilidad, construida con **NestJS**, **PostgreSQL**, **Redis**, **BullMQ**, **Stripe** y **WebSockets**.
+Production-ready REST API for high-concurrency ticket sales — built with **NestJS**, **PostgreSQL**, **Redis**, **BullMQ**, **Stripe** and **WebSockets**. Deployed on **AWS EC2**.
 
 ---
 
-## Tabla de contenidos
+## 🚀 Live API
 
-- [Descripción](#descripción)
-- [Stack tecnológico](#stack-tecnológico)
-- [Diagrama de flujo](#diagrama-de-flujo)
-- [Cómo correr el proyecto](#cómo-correr-el-proyecto)
-- [Variables de entorno](#variables-de-entorno)
-- [Tabla de endpoints](#tabla-de-endpoints)
-- [Transacciones ACID y prevención de sobreventa](#transacciones-acid-y-prevención-de-sobreventa)
-- [Swagger](#swagger)
-- [Tests](#tests)
-- [Resultados k6](#resultados-k6)
-- [Producción: MinIO → AWS S3](#producción-minio--aws-s3)
-- [Colección Postman](#colección-postman)
-- [CI/CD](#cicd)
+**📖 [ticket.lsbstack.com/api/docs](https://ticket.lsbstack.com/api/docs)** — Swagger UI (interactive, try it live)
 
----
+> Payments run in **Stripe test mode** — no real charges.
 
-## Descripción
+### How to explore the API
 
-TicketMaster API es una API REST lista para producción que permite:
+**Option 1 — Regular user (CUSTOMER role)**
 
-- **Autenticación**: registro, login, refresh tokens con rotación, logout
-- **Eventos**: CRUD de eventos con póster (S3/MinIO), estados (DRAFT, PUBLISHED, SOLD_OUT, CANCELLED, COMPLETED)
-- **Categorías de entradas**: VIP, General, etc., con stock, precios y políticas de reembolso
-- **Checkout**: compra con Stripe PaymentIntent, expiración de órdenes en 15 min
-- **Webhooks Stripe**: confirmación de pago, emails de compra vía cola BullMQ
-- **WebSockets**: emisión de `ticket:stock-updated` en tiempo real
-- **Cache Redis**: GET /events cacheado 60s
-- **Rate limiting**: throttling configurable por entorno
+1. Open `POST /auth/register` → click **Try it out** → **Execute** with the preloaded example data
+2. Copy the `accessToken` from the response
+3. Click **Authorize** (top right) → paste the token → **Authorize**
+4. All endpoints are now available
 
----
+**Option 2 — Admin user (full access)**
 
-## Stack tecnológico
+1. Open `POST /auth/login` → click **Try it out** → use these credentials:
 
-| Tecnología | Uso |
-|------------|-----|
-| **NestJS** | Framework backend |
-| **Prisma** | ORM + migraciones |
-| **PostgreSQL** | Base de datos |
-| **Redis** | Cache (GET /events) + colas BullMQ |
-| **BullMQ** | Colas: emails, expiración de órdenes |
-| **Stripe** | Pagos |
-| **Resend** | Emails transaccionales |
-| **Socket.io** | WebSockets |
-| **MinIO / S3** | Almacenamiento de imágenes |
-| **k6** | Load testing |
-| **Newman** | Tests de integración API |
+```json
+{
+  "email": "admin@ticketmaster.com",
+  "password": "Admin1234!"
+}
+```
+
+2. Copy the `accessToken` from the response
+3. Click **Authorize** → paste the token → **Authorize**
+4. Admin endpoints (create/update/delete events, manage categories, change user roles) are now unlocked
 
 ---
 
-## Diagrama de flujo
+## 💡 What this project demonstrates
+
+A production API solving real engineering problems — not a tutorial project.
+
+- **Zero overselling under high concurrency** — ACID transactions with PostgreSQL ensure exactly 1 successful checkout when 50 users hit the last ticket simultaneously (verified with k6)
+- **Async payment processing** — Stripe Webhooks trigger order confirmation and enqueue email jobs via BullMQ + Redis without blocking the API response
+- **Real-time stock updates** — Socket.io broadcasts `ticket:stock-updated` to all connected clients after each successful purchase
+- **Redis caching** — `GET /events` cached for 60s, reducing DB load on high-frequency endpoints
+- **JWT with refresh token rotation** — access tokens (15min) + refresh tokens (30d) with rotation on each refresh
+- **Rate limiting** — configurable throttling per endpoint (login: 5 req/min, checkout: 10 req/min, global: 100 req/min)
+- **Production deployment** — AWS EC2 (eu-north-1) + AWS S3 for image storage + Cloudflare DNS + Stripe webhooks configured in production
+- **Full CI pipeline** — GitHub Actions: lint → unit tests (Jest) → API integration tests (Newman) → k6 smoke test
+
+---
+
+## 🧱 Tech stack
+
+| Technology         | Usage                                          |
+| ------------------ | ---------------------------------------------- |
+| **NestJS**         | Backend framework (modular architecture)       |
+| **Prisma**         | ORM + migrations                               |
+| **PostgreSQL**     | Primary database                               |
+| **Redis**          | Cache (GET /events) + BullMQ queues            |
+| **BullMQ**         | Async job queues: emails, order expiration     |
+| **Stripe**         | Payments (PaymentIntents + Webhooks)           |
+| **Resend**         | Transactional emails                           |
+| **Socket.io**      | WebSockets for real-time stock updates         |
+| **MinIO / AWS S3** | Image storage (MinIO local → S3 in production) |
+| **k6**             | Load testing                                   |
+| **Newman**         | API integration tests (CI)                     |
+| **Swagger**        | API documentation (OpenAPI)                    |
+| **nestjs-pino**    | Structured logging                             |
+
+---
+
+## 🗺️ Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Cliente
-        A[Cliente HTTP/WebSocket]
+    subgraph Client
+        A[HTTP Client / WebSocket]
     end
 
     subgraph API
         B[Auth: Login/Register]
-        C[Events: CRUD + Cache Redis]
-        D[Categories: por evento]
+        C[Events: CRUD + Redis Cache]
+        D[Categories: per event]
         E[Orders: Checkout]
         F[Webhooks: Stripe]
     end
 
-    subgraph Servicios
+    subgraph Services
         G[(PostgreSQL)]
         H[(Redis)]
         I[BullMQ]
@@ -103,21 +119,20 @@ flowchart TB
     I --> G
 ```
 
-### Flujo de checkout
+### Checkout flow
 
 ```mermaid
 sequenceDiagram
-    participant C as Cliente
+    participant C as Client
     participant API
-
     participant DB as PostgreSQL
     participant Stripe
     participant BullMQ
     participant Email
 
     C->>API: POST /orders/checkout
-    API->>DB: $transaction (decrementar stock + crear orden)
-    alt Stock insuficiente
+    API->>DB: $transaction (decrement stock + create order)
+    alt Insufficient stock
         DB-->>API: 0 rows updated
         API-->>C: 400 Bad Request
     else OK
@@ -127,175 +142,31 @@ sequenceDiagram
         API-->>C: 201 { clientSecret, orderId }
     end
 
-    Note over C,Stripe: Cliente paga en frontend
+    Note over C,Stripe: Client completes payment on frontend
     Stripe->>API: Webhook payment_intent.succeeded
-    API->>DB: Marcar orden PAID
-    API->>BullMQ: Encolar email de compra
-    BullMQ->>Email: Enviar email
+    API->>DB: Mark order as PAID
+    API->>BullMQ: Enqueue purchase email job
+    BullMQ->>Email: Send email
 ```
 
 ---
 
-## Cómo correr el proyecto
+## ⚡ ACID transactions — zero overselling
 
-### 1. Requisitos
+The checkout engine uses `prisma.$transaction` to guarantee atomicity and prevent overselling.
 
-- **Node.js** 22+
-- **pnpm** 10+
-- **Docker** y **Docker Compose**
+### The problem
 
-### 2. Clonar e instalar
+Without transactions, two users buying the last ticket simultaneously could both succeed:
 
-```bash
-git clone <repo-url>
-cd ticketmaster-api
-pnpm install
-```
+1. User A reads `availableStock = 1`
+2. User B reads `availableStock = 1`
+3. User A decrements → creates order
+4. User B decrements → creates order → **oversell**
 
-### 3. Levantar servicios (PostgreSQL, Redis, MinIO)
+### The solution
 
-```bash
-docker-compose up -d
-```
-
-### 4. Crear bucket en MinIO (solo la primera vez)
-
-Docker Compose levanta MinIO pero el bucket no existe. Hay que crearlo manualmente:
-
-1. Abrí **http://localhost:9001** en el navegador
-2. Login: `minioadmin` / `minioadmin`
-3. Crear bucket llamado **`ticketmaster`** (o el nombre que uses en `S3_BUCKET_NAME`)
-4. Opcional: configurarlo como público si necesitás URLs directas a las imágenes
-
-### 5. Configurar variables de entorno
-
-Copiar `.env.example` a `.env` y rellenar los valores:
-
-```bash
-cp .env.example .env
-```
-
-### 6. Aplicar migraciones y seed
-
-```bash
-pnpm db:deploy
-pnpm db:seed
-```
-
-### 7. Iniciar la API
-
-```bash
-pnpm start:dev
-```
-
-La API estará en **http://localhost:3000** y Swagger en **http://localhost:3000/api/docs**.
-
-### 8. Stripe CLI (webhooks en desarrollo local)
-
-Para que los webhooks de Stripe funcionen en local, necesitás el [Stripe CLI](https://stripe.com/docs/stripe-cli) en una terminal separada:
-
-```bash
-stripe listen --forward-to localhost:3000/webhooks/stripe
-```
-
-Stripe te dará un `whsec_...` temporal; usalo en `STRIPE_WEBHOOK_SECRET` de tu `.env`.
-
----
-
-## Variables de entorno
-
-| Variable | Descripción | Ejemplo |
-|----------|-------------|---------|
-| `PORT` | Puerto del servidor | `3000` |
-| `DATABASE_URL` | URL de PostgreSQL | `postgresql://admin:adminpassword@localhost:5435/ticket_db` |
-| `JWT_SECRET` | Secreto para JWT | `tu-secreto-seguro` |
-| `ACCESS_TOKEN_EXPIRES_IN` | Expiración del access token | `15m` |
-| `REDIS_HOST` | Host de Redis | `localhost` |
-| `REDIS_PORT` | Puerto de Redis | `6379` |
-| `REDIS_PASSWORD` | Contraseña Redis (opcional) | — |
-| `S3_ENDPOINT` | URL de MinIO/S3 | `http://localhost:9000` |
-| `S3_REGION` | Región S3 | `us-east-1` |
-| `S3_ACCESS_KEY_ID` | Access key | `minioadmin` |
-| `S3_SECRET_ACCESS_KEY` | Secret key | `minioadmin` |
-| `S3_BUCKET_NAME` | Nombre del bucket | `ticketmaster` |
-| `STRIPE_SECRET_KEY` | Clave secreta Stripe | `sk_test_...` |
-| `STRIPE_WEBHOOK_SECRET` | Webhook secret Stripe | `whsec_...` |
-| `RESEND_API_KEY` | API key de Resend | `re_...` |
-| `RESEND_FROM` | Email remitente | `TicketMaster <noreply@lsbstack.com>` |
-| `EMAIL_ENABLED` | `true` para enviar emails | `true` |
-| `ADMIN_NAME` | Nombre del admin (seed) | `Admin` |
-| `ADMIN_EMAIL` | Email del admin (seed) | `admin@ticketmaster.com` |
-| `ADMIN_PASSWORD` | Contraseña del admin (seed) | `Admin1234!` |
-| `THROTTLE_GLOBAL_LIMIT` | Límite global req/min | `100` |
-| `THROTTLE_CHECKOUT_LIMIT` | Límite checkout req/min | `10` |
-| `WEBSOCKET_CORS_ORIGIN` | Origen CORS WebSocket | `*` |
-
----
-
-## Tabla de endpoints
-
-### Auth
-
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/auth/register` | Registrar usuario | — |
-| POST | `/auth/login` | Login (rate limit 5/min) | — |
-| POST | `/auth/refresh` | Refrescar tokens | — |
-| POST | `/auth/logout` | Cerrar sesión | — |
-| PATCH | `/auth/users/:id/role` | Cambiar rol (ADMIN) | ADMIN |
-
-### Events
-
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/events` | Crear evento (multipart/form-data) | ADMIN |
-| GET | `/events` | Listar eventos publicados (paginated, cache) | — |
-| GET | `/events/:id` | Obtener evento por ID | — |
-| PATCH | `/events/:id` | Actualizar evento | ADMIN |
-| PATCH | `/events/:id/status` | Cambiar estado (PUBLISHED, etc.) | ADMIN |
-| DELETE | `/events/:id` | Eliminar evento | ADMIN |
-
-### Categories
-
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/events/:eventId/categories` | Crear categoría | ADMIN |
-| GET | `/events/:eventId/categories` | Listar categorías del evento | — |
-| DELETE | `/events/:eventId/categories/:categoryId` | Eliminar categoría | ADMIN |
-
-### Orders
-
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/orders/checkout` | Crear orden y PaymentIntent | JWT |
-| POST | `/orders/:id/refund` | Solicitar reembolso | JWT |
-| GET | `/orders/my-orders` | Mis órdenes | JWT |
-| GET | `/orders/:id` | Obtener orden por ID | JWT |
-
-### Webhooks
-
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/webhooks/stripe` | Webhook Stripe (raw body) | Firma Stripe |
-
----
-
-## Transacciones ACID y prevención de sobreventa
-
-El checkout usa `prisma.$transaction` para garantizar **atomicidad** y evitar **sobreventa** de entradas.
-
-### Problema
-
-Si dos usuarios compran el último ticket al mismo tiempo, sin transacción podría ocurrir:
-
-1. Usuario A lee `availableStock = 1`
-2. Usuario B lee `availableStock = 1`
-3. Usuario A decrementa y crea orden
-4. Usuario B decrementa y crea orden → **sobreventa**
-
-### Solución
-
-Dentro de la transacción:
+Inside the transaction:
 
 ```sql
 UPDATE ticket_categories
@@ -303,41 +174,185 @@ SET "availableStock" = "availableStock" - ${quantity}
 WHERE id = ${categoryId} AND "availableStock" >= ${quantity}
 ```
 
-- **Solo se actualiza si hay stock suficiente** (`availableStock >= quantity`)
-- Si `updated === 0`, no se crea la orden y se lanza error
-- Si `updated === 1`, se crea la orden y los tickets en la misma transacción
+- Only updates if stock is sufficient (`availableStock >= quantity`)
+- If `updated === 0` → order is not created, error is thrown
+- If `updated === 1` → order and tickets are created in the same transaction
 
-### Verificación con k6
+### Verified with k6
 
-El escenario 4 (`scenario4-acid.js`) simula 50 usuarios comprando 1 ticket en una categoría con stock 1. El threshold verifica:
+Scenario 4 (`scenario4-acid.js`) simulates 50 users buying 1 ticket in a category with `stock = 1`. The threshold verifies:
 
-- `acid_successful_checkouts == 1` → ✅ Sin sobreventa
-- `acid_successful_checkouts > 1` → ❌ Sobreventa detectada
-
----
-
-## Swagger
-
-Swagger UI está disponible en:
-
-**https://ticket.lsbstack.com/api/docs** (producción)
-
-**http://localhost:3000/api/docs** (desarrollo local)
-
-Cuando la API está corriendo, puedes explorar todos los endpoints, autenticarte con Bearer token y probar las peticiones desde el navegador.
+- `acid_successful_checkouts == 1` → ✅ No overselling
+- `acid_successful_checkouts > 1` → ❌ Oversell detected
 
 ---
 
-## Tests
+## 📊 Load test results (k6)
+
+| Scenario       | Users        | p95     | req/s  | Error rate | Result |
+| -------------- | ------------ | ------- | ------ | ---------- | ------ |
+| 1 — Ramp-up    | 0→500        | 11.32ms | 390.14 | 0%         | ✅     |
+| 2 — Spike      | 1000         | 14.4s   | 136.36 | 0%         | ✅     |
+| 3 — Soak       | 200 / 5min   | 11.15ms | 247.11 | 0%         | ✅     |
+| 4 — ACID       | 50 / stock=1 | 79.07ms | —      | 1 checkout | ✅     |
+| 5 — Rate limit | 1 / 7 reqs   | —       | —      | 2× 429     | ✅     |
+
+Full documentation in [k6/README.md](k6/README.md).
+
+---
+
+## 📋 Endpoints
+
+### Auth
+
+| Method | Route                  | Description              | Auth  |
+| ------ | ---------------------- | ------------------------ | ----- |
+| POST   | `/auth/register`       | Register new user        | —     |
+| POST   | `/auth/login`          | Login (rate limit 5/min) | —     |
+| POST   | `/auth/refresh`        | Refresh tokens           | —     |
+| POST   | `/auth/logout`         | Logout                   | —     |
+| PATCH  | `/auth/users/:id/role` | Change user role         | ADMIN |
+
+### Events
+
+| Method | Route                | Description                               | Auth  |
+| ------ | -------------------- | ----------------------------------------- | ----- |
+| POST   | `/events`            | Create event (multipart/form-data)        | ADMIN |
+| GET    | `/events`            | List published events (paginated, cached) | —     |
+| GET    | `/events/:id`        | Get event by ID                           | —     |
+| PATCH  | `/events/:id`        | Update event                              | ADMIN |
+| PATCH  | `/events/:id/status` | Change status (PUBLISHED, etc.)           | ADMIN |
+| DELETE | `/events/:id`        | Delete event                              | ADMIN |
+
+### Categories
+
+| Method | Route                                     | Description           | Auth  |
+| ------ | ----------------------------------------- | --------------------- | ----- |
+| POST   | `/events/:eventId/categories`             | Create category       | ADMIN |
+| GET    | `/events/:eventId/categories`             | List event categories | —     |
+| DELETE | `/events/:eventId/categories/:categoryId` | Delete category       | ADMIN |
+
+### Orders
+
+| Method | Route                | Description                  | Auth |
+| ------ | -------------------- | ---------------------------- | ---- |
+| POST   | `/orders/checkout`   | Create order + PaymentIntent | JWT  |
+| POST   | `/orders/:id/refund` | Request refund               | JWT  |
+| GET    | `/orders/my-orders`  | My orders                    | JWT  |
+| GET    | `/orders/:id`        | Get order by ID              | JWT  |
+
+### Webhooks
+
+| Method | Route              | Description               | Auth             |
+| ------ | ------------------ | ------------------------- | ---------------- |
+| POST   | `/webhooks/stripe` | Stripe webhook (raw body) | Stripe signature |
+
+---
+
+## 🚀 Getting started
+
+### Prerequisites
+
+- **Node.js** 22+
+- **pnpm** 10+
+- **Docker** and **Docker Compose**
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/LucasBenitez7/ticketmaster-api.git
+cd ticketmaster-api
+pnpm install
+```
+
+### 2. Start services (PostgreSQL, Redis, MinIO)
+
+```bash
+docker-compose up -d
+```
+
+### 3. Create MinIO bucket (first time only)
+
+1. Open **http://localhost:9001**
+2. Login: `minioadmin` / `minioadmin`
+3. Create a bucket named `ticketmaster`
+
+### 4. Set up environment variables
+
+```bash
+cp .env.example .env
+```
+
+### 5. Run migrations and seed
+
+```bash
+pnpm db:deploy
+pnpm db:seed
+```
+
+### 6. Start the API
+
+```bash
+pnpm start:dev
+```
+
+API available at **http://localhost:3000** — Swagger at **http://localhost:3000/api/docs**
+
+### 7. Stripe CLI (local webhooks)
+
+```bash
+stripe listen --forward-to localhost:3000/webhooks/stripe
+```
+
+---
+
+## ⚙️ Environment variables
+
+| Variable                  | Description                 | Example                                            |
+| ------------------------- | --------------------------- | -------------------------------------------------- |
+| `PORT`                    | Server port                 | `3000`                                             |
+| `DATABASE_URL`            | PostgreSQL URL              | `postgresql://admin:pass@localhost:5435/ticket_db` |
+| `JWT_SECRET`              | JWT secret                  | `your-secret`                                      |
+| `ACCESS_TOKEN_EXPIRES_IN` | Access token expiry         | `15m`                                              |
+| `REDIS_HOST`              | Redis host                  | `localhost`                                        |
+| `REDIS_PORT`              | Redis port                  | `6379`                                             |
+| `S3_ENDPOINT`             | MinIO/S3 URL                | `http://localhost:9000`                            |
+| `S3_REGION`               | S3 region                   | `us-east-1`                                        |
+| `S3_ACCESS_KEY_ID`        | Access key                  | `minioadmin`                                       |
+| `S3_SECRET_ACCESS_KEY`    | Secret key                  | `minioadmin`                                       |
+| `S3_BUCKET_NAME`          | Bucket name                 | `ticketmaster`                                     |
+| `STRIPE_SECRET_KEY`       | Stripe secret key           | `sk_test_...`                                      |
+| `STRIPE_WEBHOOK_SECRET`   | Webhook secret              | `whsec_...`                                        |
+| `RESEND_API_KEY`          | Resend API key              | `re_...`                                           |
+| `RESEND_FROM`             | Sender email                | `TicketMaster <noreply@lsbstack.com>`              |
+| `EMAIL_ENABLED`           | Enable email sending        | `true`                                             |
+| `THROTTLE_GLOBAL_LIMIT`   | Global rate limit req/min   | `100`                                              |
+| `THROTTLE_CHECKOUT_LIMIT` | Checkout rate limit req/min | `10`                                               |
+
+---
+
+## ☁️ Production: MinIO → AWS S3
+
+| Variable               | Development             | Production           |
+| ---------------------- | ----------------------- | -------------------- |
+| `S3_ENDPOINT`          | `http://localhost:9000` | `""` (empty for AWS) |
+| `S3_REGION`            | `us-east-1`             | `eu-north-1`         |
+| `S3_ACCESS_KEY_ID`     | `minioadmin`            | Your AWS key         |
+| `S3_SECRET_ACCESS_KEY` | `minioadmin`            | Your AWS secret      |
+| `S3_BUCKET_NAME`       | `ticketmaster`          | Your bucket name     |
+
+---
+
+## 🧪 Tests
 
 ```bash
 # Unit tests (Jest)
 pnpm test
 
-# Unit tests con coverage
+# Unit tests with coverage
 pnpm test:cov
 
-# Tests de integración API (Newman)
+# API integration tests (Newman)
 pnpm test:api
 
 # Load tests (k6)
@@ -346,73 +361,29 @@ k6 run k6/scenario1-rampup.js
 
 ---
 
-## Resultados k6
+## 🤖 CI/CD
 
-| Escenario | Usuarios | p95 | req/s | Error rate | Resultado |
-|-----------|----------|-----|-------|------------|-----------|
-| 1 - Ramp-up | 0→500 | 11.32ms | 390.14 | 0% | ✅ |
-| 2 - Spike | 1000 | 14.4s | 136.36 | 0% | ✅ |
-| 3 - Soak | 200 / 5min | 11.15ms | 247.11 | 0% | ✅ |
-| 4 - ACID | 50 / stock=1 | 79.07ms | — | 1 checkout | ✅ |
-| 5 - Rate limit | 1 / 7 reqs | — | — | 2× 429 | ✅ |
+GitHub Actions runs on every push/PR to `development` and `main`:
 
-Documentación detallada en [k6/README.md](k6/README.md).
+| Workflow     | Description                                |
+| ------------ | ------------------------------------------ |
+| **CI**       | Lint, typecheck and unit tests (Jest)      |
+| **Newman**   | API integration tests (PostgreSQL + Redis) |
+| **k6 Smoke** | Smoke test with 10 VUs for 30s             |
 
 ---
 
-## Producción: MinIO → AWS S3
+## 📬 Postman collection
 
-En desarrollo se usa **MinIO** para almacenamiento de imágenes. En producción:
-
-1. **Configura un bucket en AWS S3** (o compatible S3: DigitalOcean Spaces, Cloudflare R2, etc.)
-
-2. **Variables de entorno**
-
-   | Variable | Desarrollo | Producción |
-   |----------|------------|------------|
-   | `S3_ENDPOINT` | `http://localhost:9000` | `""` (vacío para AWS) |
-   | `S3_REGION` | `us-east-1` | `eu-west-1` (tu región) |
-   | `S3_ACCESS_KEY_ID` | `minioadmin` | Tu clave AWS |
-   | `S3_SECRET_ACCESS_KEY` | `minioadmin` | Tu secreto AWS |
-   | `S3_BUCKET_NAME` | `ticketmaster` | Nombre del bucket |
-
-3. **URLs de imágenes**  
-   Con `S3_ENDPOINT` vacío, el cliente S3 usa URLs públicas de AWS (o CloudFront si lo configuras).
-
-4. **CORS**  
-   Configura CORS en el bucket para permitir tu dominio frontend.
-
----
-
-## Colección Postman
-
-La colección y el entorno están en el repositorio:
-
-- **Colección**: `postman/ticketmaster.postman_collection.json`
-- **Entorno**: `postman/ticketmaster.postman_environment.json`
-
-Para ejecutar con Newman:
+- **Collection**: `postman/ticketmaster.postman_collection.json`
+- **Environment**: `postman/ticketmaster.postman_environment.json`
 
 ```bash
-pnpm test:api
+pnpm test:api  # runs Newman and generates HTML report at postman/results.html
 ```
 
-El reporte HTML se genera en `postman/results.html`.
-
 ---
 
-## CI/CD
-
-GitHub Actions ejecuta en cada push/PR a `development` y `main`:
-
-| Workflow | Descripción |
-|----------|-------------|
-| **CI** | Lint, typecheck y tests unitarios (Jest) |
-| **Newman** | Tests de integración API (PostgreSQL + Redis) |
-| **k6 Smoke** | Smoke test con 10 VUs durante 30s |
-
----
-
-## Licencia
+## 📄 License
 
 UNLICENSED
